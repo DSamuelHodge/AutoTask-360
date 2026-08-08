@@ -9,8 +9,11 @@ import com.example.data.AutoTaskRepository
 import com.example.data.ExecutionLog
 import com.example.engine.AutoTaskEngine
 import com.example.engine.AutomationEvent
+import com.example.server.KtorServerConfig
+import com.example.server.KtorServerSnapshot
 import com.example.service.AutoTaskService
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -44,7 +47,7 @@ class AutoTaskViewModel(application: Application) : AndroidViewModel(application
             initialValue = emptyList()
         )
 
-    private val _isServiceRunning = MutableStateFlow(true)
+    private val _isServiceRunning = MutableStateFlow(false)
     val isServiceRunning: StateFlow<Boolean> = _isServiceRunning.asStateFlow()
 
     private val _apiTestResponse = MutableStateFlow<String>("")
@@ -52,6 +55,9 @@ class AutoTaskViewModel(application: Application) : AndroidViewModel(application
 
     private val _isApiTestLoading = MutableStateFlow(false)
     val isApiTestLoading: StateFlow<Boolean> = _isApiTestLoading.asStateFlow()
+
+    private val _ktorServerConfig = MutableStateFlow(KtorServerConfig.getSnapshot(application))
+    val ktorServerConfig: StateFlow<KtorServerSnapshot> = _ktorServerConfig.asStateFlow()
 
     private val httpClient by lazy {
         OkHttpClient.Builder()
@@ -65,7 +71,14 @@ class AutoTaskViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             repository.seedDefaultRecipesIfNeeded()
             AutoTaskService.startService(application)
-            _isServiceRunning.value = true
+            refreshRuntimeStatus()
+        }
+
+        viewModelScope.launch {
+            while (true) {
+                refreshRuntimeStatus()
+                delay(1000L)
+            }
         }
     }
 
@@ -74,12 +87,54 @@ class AutoTaskViewModel(application: Application) : AndroidViewModel(application
         if (enable) {
             AutoTaskService.startService(app)
             engine.setRunningState(true)
-            _isServiceRunning.value = true
+            refreshRuntimeStatus()
         } else {
             AutoTaskService.stopService(app)
             engine.setRunningState(false)
-            _isServiceRunning.value = false
+            refreshRuntimeStatus()
         }
+    }
+
+    fun setKtorServerEnabled(enabled: Boolean) {
+        val app = getApplication<Application>()
+        KtorServerConfig.setEnabled(app, enabled)
+        AutoTaskService.restartKtorServer(app)
+        refreshRuntimeStatus()
+    }
+
+    fun setKtorServerPort(portText: String) {
+        val app = getApplication<Application>()
+        val port = portText.toIntOrNull()
+        if (port == null) {
+            _apiTestResponse.value = "Ktor Server Config Failed:\nPort must be a number."
+            return
+        }
+
+        val validationError = KtorServerConfig.savePort(app, port)
+        if (validationError != null) {
+            _apiTestResponse.value = "Ktor Server Config Failed:\n$validationError"
+            refreshRuntimeStatus()
+            return
+        }
+
+        AutoTaskService.restartKtorServer(app)
+        _apiTestResponse.value = "Ktor server restart requested for ${KtorServerConfig.HOST}:$port."
+        refreshRuntimeStatus()
+    }
+
+    fun resetKtorServerConfig() {
+        val app = getApplication<Application>()
+        KtorServerConfig.reset(app)
+        AutoTaskService.restartKtorServer(app)
+        _apiTestResponse.value = "Ktor server reset to ${KtorServerConfig.HOST}:${KtorServerConfig.DEFAULT_PORT}."
+        refreshRuntimeStatus()
+    }
+
+    fun restartKtorServer() {
+        val app = getApplication<Application>()
+        AutoTaskService.restartKtorServer(app)
+        _apiTestResponse.value = "Ktor server restart requested for ${KtorServerConfig.getSnapshot(app).baseUrl}."
+        refreshRuntimeStatus()
     }
 
     fun toggleProfileEnabled(profileId: String, currentEnabled: Boolean) {
@@ -119,11 +174,13 @@ class AutoTaskViewModel(application: Application) : AndroidViewModel(application
     fun executeApiTest(method: String, endpoint: String, body: String = "") {
         viewModelScope.launch {
             _isApiTestLoading.value = true
-            _apiTestResponse.value = "Sending $method http://127.0.0.1:8788$endpoint ..."
+            refreshRuntimeStatus()
+            val baseUrl = _ktorServerConfig.value.baseUrl
+            _apiTestResponse.value = "Sending $method $baseUrl$endpoint ..."
 
             withContext(Dispatchers.IO) {
                 try {
-                    val url = "http://127.0.0.1:8788$endpoint"
+                    val url = "$baseUrl$endpoint"
                     val requestBuilder = Request.Builder().url(url)
 
                     when (method.uppercase()) {
@@ -155,9 +212,15 @@ class AutoTaskViewModel(application: Application) : AndroidViewModel(application
                     _apiTestResponse.value = "HTTP Request Failed:\n${e.localizedMessage ?: "Connection refused. Is AutoTask engine running?"}"
                 } finally {
                     _isApiTestLoading.value = false
+                    refreshRuntimeStatus()
                 }
             }
         }
+    }
+
+    private fun refreshRuntimeStatus() {
+        _ktorServerConfig.value = KtorServerConfig.getSnapshot(getApplication())
+        _isServiceRunning.value = AutoTaskService.isForegroundActive && engine.isRunning
     }
 }
 

@@ -10,7 +10,8 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
 import io.ktor.server.cio.CIO
-import io.ktor.server.engine.ApplicationEngine
+import io.ktor.server.cio.CIOApplicationEngine
+import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respondText
@@ -28,8 +29,8 @@ class KtorLoopbackServer(
     private val context: Context,
     private val port: Int = 8788
 ) {
-    private var serverEngine: ApplicationEngine? = null
-    private val engine = AutoTaskEngine.getInstance(context)
+    private var serverEngine: EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? = null
+    private val autoTaskEngine = AutoTaskEngine.getInstance(context)
 
     fun start() {
         if (serverEngine != null) return
@@ -38,14 +39,21 @@ class KtorLoopbackServer(
             routing {
                 // GET /v1/status
                 get("/v1/status") {
-                    val statusMap = engine.repository.getStatusMap()
+                    val statusMap = autoTaskEngine.repository.getStatusMap()
                     val json = JSONObject()
-                    json.put("engine_running", if (engine.isRunning) 1 else 0)
+                    json.put("engine_running", if (autoTaskEngine.isRunning) 1 else 0)
                     json.put("profile_count", statusMap["profile_count"])
                     json.put("log_count", statusMap["log_count"])
                     json.put("relay_target", "http://127.0.0.1:$port")
+                    json.put("ktor_server_enabled", statusMap["ktor_server_enabled"])
+                    json.put("ktor_server_host", statusMap["ktor_server_host"])
+                    json.put("ktor_server_port", statusMap["ktor_server_port"])
+                    json.put("ktor_server_running", statusMap["ktor_server_running"])
+                    json.put("listener_port", statusMap["listener_port"])
+                    json.put("last_server_error", statusMap["last_server_error"])
+                    json.put("last_server_result", statusMap["last_server_result"])
                     json.put("provider_uri", "content://com.example.autotask.provider")
-                    json.put("uptime_ms", engine.getUptimeMs())
+                    json.put("uptime_ms", autoTaskEngine.getUptimeMs())
                     json.put("version", "1.0.0")
 
                     call.respondJson(json.toString(2))
@@ -58,7 +66,7 @@ class KtorLoopbackServer(
 
                 // GET /v1/profiles
                 get("/v1/profiles") {
-                    val profiles = engine.repository.profileDao.getAllProfiles()
+                    val profiles = autoTaskEngine.repository.profileDao.getAllProfiles()
                     val arr = JSONArray()
                     profiles.forEach { p ->
                         arr.put(profileToJson(p))
@@ -69,7 +77,7 @@ class KtorLoopbackServer(
                 // GET /v1/profiles/{id}
                 get("/v1/profiles/{id}") {
                     val id = call.parameters["id"] ?: ""
-                    val p = engine.repository.getProfileById(id)
+                    val p = autoTaskEngine.repository.getProfileById(id)
                     if (p != null) {
                         call.respondJson(profileToJson(p).toString(2))
                     } else {
@@ -116,7 +124,7 @@ class KtorLoopbackServer(
                             updatedAt = now
                         )
 
-                        engine.repository.upsertProfile(profile)
+                        autoTaskEngine.repository.upsertProfile(profile)
 
                         val resp = JSONObject()
                         resp.put("status", "OK")
@@ -132,7 +140,7 @@ class KtorLoopbackServer(
                 patch("/v1/profiles/{id}") {
                     val id = call.parameters["id"] ?: ""
                     val bodyText = call.receiveText()
-                    val existing = engine.repository.getProfileById(id)
+                    val existing = autoTaskEngine.repository.getProfileById(id)
                     if (existing == null) {
                         call.respondError(HttpStatusCode.NotFound, "Profile not found: $id")
                         return@patch
@@ -153,7 +161,7 @@ class KtorLoopbackServer(
                             updatedAt = System.currentTimeMillis()
                         )
 
-                        engine.repository.updateProfile(updated)
+                        autoTaskEngine.repository.updateProfile(updated)
 
                         val resp = JSONObject()
                         resp.put("status", "OK")
@@ -168,7 +176,7 @@ class KtorLoopbackServer(
                 // DELETE /v1/profiles/{id}
                 delete("/v1/profiles/{id}") {
                     val id = call.parameters["id"] ?: ""
-                    val deleted = engine.repository.deleteProfileById(id)
+                    val deleted = autoTaskEngine.repository.deleteProfileById(id)
                     if (deleted) {
                         val resp = JSONObject()
                         resp.put("status", "OK")
@@ -193,7 +201,7 @@ class KtorLoopbackServer(
                         }
 
                         val event = AutomationEvent(type = triggerType, payload = payloadMap)
-                        val logs = engine.processEvent(event)
+                        val logs = autoTaskEngine.processEvent(event)
 
                         val resp = JSONObject()
                         resp.put("status", "OK")
@@ -222,7 +230,7 @@ class KtorLoopbackServer(
                 // GET /v1/logs?limit=N
                 get("/v1/logs") {
                     val limitParam = call.request.queryParameters["limit"]?.toIntOrNull() ?: 100
-                    val logs = engine.repository.logDao.getLogs(limitParam)
+                    val logs = autoTaskEngine.repository.logDao.getLogs(limitParam)
 
                     val arr = JSONArray()
                     logs.forEach { l ->
@@ -243,7 +251,7 @@ class KtorLoopbackServer(
 
                 // DELETE /v1/logs
                 delete("/v1/logs") {
-                    engine.repository.clearLogs()
+                    autoTaskEngine.repository.clearLogs()
                     val resp = JSONObject()
                     resp.put("status", "OK")
                     resp.put("message", "Execution logs cleared")

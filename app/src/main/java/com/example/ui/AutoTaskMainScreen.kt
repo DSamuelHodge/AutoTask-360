@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -75,6 +76,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -94,6 +96,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.AutomationProfile
 import com.example.data.ExecutionLog
 import com.example.engine.SchemaProvider
+import com.example.server.KtorServerSnapshot
 import com.example.ui.theme.HighDensityErrorContainer
 import com.example.ui.theme.HighDensityErrorRed
 import com.example.ui.theme.HighDensityOnErrorContainer
@@ -137,6 +140,7 @@ fun AutoTaskMainScreen(viewModel: AutoTaskViewModel) {
     val isServiceRunning by viewModel.isServiceRunning.collectAsState()
     val apiTestResponse by viewModel.apiTestResponse.collectAsState()
     val isApiTestLoading by viewModel.isApiTestLoading.collectAsState()
+    val ktorServerConfig by viewModel.ktorServerConfig.collectAsState()
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Policies, 1: Catalogue, 2: Logs, 3: Events, 4: Status
     var showAddDialog by remember { mutableStateOf(false) }
@@ -154,6 +158,8 @@ fun AutoTaskMainScreen(viewModel: AutoTaskViewModel) {
                 containerColor = Color.White,
                 tonalElevation = 4.dp,
                 modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
                     .height(72.dp)
                     .border(1.dp, HighDensitySurfaceVariant)
             ) {
@@ -201,6 +207,7 @@ fun AutoTaskMainScreen(viewModel: AutoTaskViewModel) {
             // Header
             HeaderSection(
                 isRunning = isServiceRunning,
+                serverBaseUrl = ktorServerConfig.baseUrl,
                 onToggleService = { viewModel.toggleService(it) }
             )
 
@@ -273,8 +280,13 @@ fun AutoTaskMainScreen(viewModel: AutoTaskViewModel) {
                         4 -> StatusTab(
                             isServiceRunning = isServiceRunning,
                             logs = logs,
+                            serverConfig = ktorServerConfig,
                             apiTestResponse = apiTestResponse,
                             isApiTestLoading = isApiTestLoading,
+                            onSetServerEnabled = { enabled -> viewModel.setKtorServerEnabled(enabled) },
+                            onSetServerPort = { port -> viewModel.setKtorServerPort(port) },
+                            onRestartServer = { viewModel.restartKtorServer() },
+                            onResetServer = { viewModel.resetKtorServerConfig() },
                             onExecuteApiTest = { method, endpoint, body ->
                                 viewModel.executeApiTest(method, endpoint, body)
                             }
@@ -393,6 +405,7 @@ private fun parseSchemaData(): Pair<List<CatalogueTriggerItem>, List<CatalogueAc
 @Composable
 private fun HeaderSection(
     isRunning: Boolean,
+    serverBaseUrl: String,
     onToggleService: (Boolean) -> Unit
 ) {
     Row(
@@ -440,7 +453,7 @@ private fun HeaderSection(
                     .padding(horizontal = 10.dp, vertical = 4.dp)
             ) {
                 Text(
-                    text = "127.0.0.1:8788",
+                    text = serverBaseUrl.removePrefix("http://"),
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
@@ -1372,13 +1385,23 @@ private fun getSamplePayloadForTrigger(type: String): String {
 private fun StatusTab(
     isServiceRunning: Boolean,
     logs: List<ExecutionLog>,
+    serverConfig: KtorServerSnapshot,
     apiTestResponse: String,
     isApiTestLoading: Boolean,
+    onSetServerEnabled: (Boolean) -> Unit,
+    onSetServerPort: (String) -> Unit,
+    onRestartServer: () -> Unit,
+    onResetServer: () -> Unit,
     onExecuteApiTest: (String, String, String) -> Unit
 ) {
     var selectedMethod by remember { mutableStateOf("GET") }
     var selectedEndpoint by remember { mutableStateOf("/v1/status") }
     var requestBody by remember { mutableStateOf("") }
+    var serverPortText by remember { mutableStateOf(serverConfig.port.toString()) }
+
+    LaunchedEffect(serverConfig.port) {
+        serverPortText = serverConfig.port.toString()
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(12.dp),
@@ -1398,10 +1421,81 @@ private fun StatusTab(
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Ktor Server: http://127.0.0.1:8788", fontSize = 11.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                    Text("ContentProvider: content://com.example.autotask.provider", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.weight(1f)) {
+                            Text("Ktor Server", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(serverConfig.baseUrl, fontSize = 11.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        }
+                        Switch(
+                            checked = serverConfig.enabled,
+                            onCheckedChange = onSetServerEnabled,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = HighDensityPrimary,
+                                checkedTrackColor = HighDensityPrimaryContainer
+                            )
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = serverPortText,
+                            onValueChange = { value ->
+                                serverPortText = value.filter { it.isDigit() }.take(5)
+                            },
+                            label = { Text("Port", fontSize = 10.sp) },
+                            singleLine = true,
+                            textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(
+                            onClick = { onSetServerPort(serverPortText) },
+                            colors = ButtonDefaults.buttonColors(containerColor = HighDensityPrimary),
+                            contentPadding = PaddingValues(horizontal = 10.dp),
+                            modifier = Modifier.height(48.dp)
+                        ) {
+                            Text("SET", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onRestartServer,
+                            modifier = Modifier.weight(1f).height(34.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Restart", modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("RESTART", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                        OutlinedButton(
+                            onClick = onResetServer,
+                            modifier = Modifier.weight(1f).height(34.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        ) {
+                            Text("RESET 8788", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
                     Text("Service Status: ${if (isServiceRunning) "Active (Foreground)" else "Stopped"}", fontSize = 10.sp)
+                    Text("Ktor HTTP Server: ${if (serverConfig.isRunning) "Running" else "Stopped"}", fontSize = 10.sp)
+                    Text("Listener Port: ${serverConfig.listenerPort} reserved", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                    Text("ContentProvider: content://com.example.autotask.provider", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                    Text("Last Result: ${serverConfig.lastResult}", fontSize = 10.sp)
+                    if (serverConfig.lastError.isNotBlank()) {
+                        Text("Last Error: ${serverConfig.lastError}", fontSize = 10.sp, color = HighDensityErrorRed)
+                    }
                 }
             }
         }

@@ -10,6 +10,7 @@ import com.example.data.AutomationProfile
 import com.example.data.AutoTaskDatabase
 import com.example.engine.AutoTaskEngine
 import com.example.engine.AutomationEvent
+import com.example.server.KtorServerConfig
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 
@@ -61,6 +62,13 @@ class AutoTaskContentProvider : ContentProvider() {
                     "profile_count",
                     "log_count",
                     "relay_target",
+                    "ktor_server_enabled",
+                    "ktor_server_host",
+                    "ktor_server_port",
+                    "ktor_server_running",
+                    "listener_port",
+                    "last_server_error",
+                    "last_server_result",
                     "uptime_ms",
                     "version"
                 ))
@@ -68,11 +76,19 @@ class AutoTaskContentProvider : ContentProvider() {
                     val profileCount = db.profileDao().getProfileCount()
                     val logCount = db.logDao().getLogCount()
                     val isRunning = if (engine.isRunning) 1 else 0
+                    val serverConfig = KtorServerConfig.getSnapshot(requireNotNull(context))
                     cursor.addRow(arrayOf(
                         isRunning,
                         profileCount,
                         logCount,
-                        "http://127.0.0.1:8788",
+                        serverConfig.baseUrl,
+                        serverConfig.enabled,
+                        serverConfig.host,
+                        serverConfig.port,
+                        serverConfig.isRunning,
+                        serverConfig.listenerPort,
+                        serverConfig.lastError,
+                        serverConfig.lastResult,
                         engine.getUptimeMs(),
                         "1.0.0"
                     ))

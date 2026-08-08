@@ -14,7 +14,9 @@ object Matcher {
         profile: AutomationProfile,
         event: AutomationEvent,
         deviceState: Map<String, Any?> = emptyMap(),
-        nowMs: Long = System.currentTimeMillis()
+        nowMs: Long = System.currentTimeMillis(),
+        evaluateCooldown: Boolean = true,
+        evaluateTriggerConfig: Boolean = true
     ): MatchResult {
         // 1. Check if enabled
         if (!profile.isEnabled) {
@@ -22,14 +24,16 @@ object Matcher {
         }
 
         // 2. Check Cooldown
-        if (profile.cooldownMs > 0 && (nowMs - profile.lastTriggeredAt) < profile.cooldownMs) {
+        if (evaluateCooldown && profile.cooldownMs > 0 && (nowMs - profile.lastTriggeredAt) < profile.cooldownMs) {
             return MatchResult(false, "cooldown_active")
         }
 
         // 3. Evaluate trigger_config_json against event.payload
-        val configMatchReason = evaluateTriggerConfig(profile.triggerType, profile.triggerConfigJson, event.payload)
-        if (configMatchReason != null) {
-            return MatchResult(false, configMatchReason)
+        if (evaluateTriggerConfig) {
+            val configMatchReason = evaluateTriggerConfig(profile.triggerType, profile.triggerConfigJson, event.payload)
+            if (configMatchReason != null) {
+                return MatchResult(false, configMatchReason)
+            }
         }
 
         // 4. Evaluate conditions_json against runtime deviceState

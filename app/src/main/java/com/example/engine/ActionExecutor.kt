@@ -21,8 +21,10 @@ import com.example.data.AutomationProfile
 import com.example.data.AutoTaskRepository
 import com.example.data.ExecutionLog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -44,6 +46,17 @@ class ActionExecutor(
     private val context: Context,
     private val repository: AutoTaskRepository
 ) {
+    companion object {
+        fun finalStatusFor(results: List<StepResult>): String {
+            val hasFailures = results.any { it.status != "OK" }
+            return when {
+                hasFailures && results.any { it.status == "OK" } -> "PARTIAL"
+                hasFailures -> "FAILED"
+                else -> "SUCCESS"
+            }
+        }
+    }
+
     private var tts: TextToSpeech? = null
     private var ttsReady = false
 
@@ -72,7 +85,6 @@ class ActionExecutor(
         event: AutomationEvent
     ): Pair<String, List<StepResult>> = withContext(Dispatchers.IO) {
         val results = mutableListOf<StepResult>()
-        var hasFailures = false
 
         if (profile.actionsJson.isBlank() || profile.actionsJson.trim() == "[]") {
             return@withContext Pair("SUCCESS", emptyList())
@@ -87,23 +99,13 @@ class ActionExecutor(
 
                 val stepRes = runSingleAction(i, type, paramsObj, profile, event)
                 results.add(stepRes)
-
-                if (stepRes.status != "OK") {
-                    hasFailures = true
-                }
             }
         } catch (e: Exception) {
             results.add(StepResult(0, "PARSE_ERROR", "FAILED", e.localizedMessage ?: "Invalid actions JSON"))
             return@withContext Pair("FAILED", results)
         }
 
-        val finalStatus = when {
-            hasFailures && results.any { it.status == "OK" } -> "PARTIAL"
-            hasFailures -> "FAILED"
-            else -> "SUCCESS"
-        }
-
-        Pair(finalStatus, results)
+        Pair(finalStatusFor(results), results)
     }
 
     private suspend fun runSingleAction(
@@ -220,6 +222,7 @@ class ActionExecutor(
                     val rawText = params.optString("text", "AutoTask automation executed")
                     val textToSpeak = substituteTemplate(rawText, profile, event)
 
+                    waitForTextToSpeechReady()
                     if (ttsReady && tts != null) {
                         tts?.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, null, "AutoTaskTTS")
                         StepResult(stepIndex, type, "OK", "Spoke: $textToSpeak")
@@ -476,6 +479,18 @@ class ActionExecutor(
         }
     }
 
+    private suspend fun waitForTextToSpeechReady() {
+        if (ttsReady) return
+        try {
+            withTimeout(2000L) {
+                while (!ttsReady) {
+                    delay(50L)
+                }
+            }
+        } catch (_: TimeoutCancellationException) {
+        }
+    }
+
     private fun showNotification(title: String, text: String, priority: String) {
         val channelId = "autotask_execution_channel"
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -550,4 +565,3 @@ class ActionExecutor(
         }
     }
 }
-

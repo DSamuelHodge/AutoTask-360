@@ -12,6 +12,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.example.engine.AutoTaskEngine
 import com.example.server.KtorLoopbackServer
+import com.example.server.KtorServerConfig
 
 class AutoTaskService : Service() {
 
@@ -20,6 +21,11 @@ class AutoTaskService : Service() {
         const val NOTIFICATION_ID = 8788
         const val ACTION_START = "com.example.autotask.action.START"
         const val ACTION_STOP = "com.example.autotask.action.STOP"
+        const val ACTION_RESTART_KTOR = "com.example.autotask.action.RESTART_KTOR"
+
+        @Volatile
+        var isForegroundActive: Boolean = false
+            private set
 
         fun startService(context: Context) {
             val intent = Intent(context, AutoTaskService::class.java).apply {
@@ -38,6 +44,17 @@ class AutoTaskService : Service() {
             }
             context.startService(intent)
         }
+
+        fun restartKtorServer(context: Context) {
+            val intent = Intent(context, AutoTaskService::class.java).apply {
+                action = ACTION_RESTART_KTOR
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }
     }
 
     private val binder = LocalBinder()
@@ -54,13 +71,7 @@ class AutoTaskService : Service() {
         createNotificationChannel()
         engine = AutoTaskEngine.getInstance(this)
 
-        // Start Ktor HTTP server on 127.0.0.1:8788
-        try {
-            ktorServer = KtorLoopbackServer(this, 8788)
-            ktorServer?.start()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        startKtorServer()
 
         // Register system broadcast receivers
         receivers = SystemEventReceivers(this)
@@ -68,14 +79,21 @@ class AutoTaskService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            stopForeground(true)
-            stopSelf()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_STOP -> {
+                isForegroundActive = false
+                stopForeground(true)
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_RESTART_KTOR -> {
+                restartKtorServerInternal()
+            }
         }
 
         val notification = createServiceNotification()
         startForeground(NOTIFICATION_ID, notification)
+        isForegroundActive = true
         engine.setRunningState(true)
 
         return START_STICKY
@@ -87,8 +105,36 @@ class AutoTaskService : Service() {
 
         receivers?.unregister()
         ktorServer?.stop()
+        KtorServerConfig.markStopped(this)
         engine.setRunningState(false)
+        isForegroundActive = false
         super.onDestroy()
+    }
+
+    private fun restartKtorServerInternal() {
+        ktorServer?.stop()
+        ktorServer = null
+        KtorServerConfig.markStopped(this, "Restarting")
+        startKtorServer()
+    }
+
+    private fun startKtorServer() {
+        if (!KtorServerConfig.isEnabled(this)) {
+            KtorServerConfig.markStopped(this, "Disabled")
+            return
+        }
+
+        val port = KtorServerConfig.getPort(this)
+        try {
+            ktorServer = KtorLoopbackServer(this, port)
+            ktorServer?.start()
+            KtorServerConfig.markStarted(this, port)
+        } catch (e: Exception) {
+            ktorServer = null
+            val message = e.localizedMessage ?: e.javaClass.simpleName
+            KtorServerConfig.markFailed(this, message)
+            e.printStackTrace()
+        }
     }
 
     private fun createNotificationChannel() {
@@ -109,7 +155,7 @@ class AutoTaskService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentTitle("AutoTask Engine Running")
-            .setContentText("Ktor server active at 127.0.0.1:8788 • ContentProvider active")
+            .setContentText("Ktor server ${KtorServerConfig.getSnapshot(this).baseUrl} • ContentProvider active")
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .build()

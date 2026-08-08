@@ -60,7 +60,8 @@ class AutoTaskEngine private constructor(
 
         // Handle MANUAL trigger if fired directly with a specific profileId in payload
         val targetProfileId = event.payload["profileId"]?.toString()
-        val targetProfiles = if (event.type == "MANUAL" && !targetProfileId.isNullOrEmpty()) {
+        val isTargetedManualEvent = event.type == "MANUAL" && !targetProfileId.isNullOrEmpty()
+        val targetProfiles = if (isTargetedManualEvent) {
             val prof = repository.getProfileById(targetProfileId)
             if (prof != null) listOf(prof) else sortedProfiles
         } else {
@@ -72,22 +73,26 @@ class AutoTaskEngine private constructor(
                 profile = profile,
                 event = event,
                 deviceState = collectCurrentDeviceState(),
-                nowMs = now
+                nowMs = now,
+                evaluateCooldown = !isTargetedManualEvent,
+                evaluateTriggerConfig = !isTargetedManualEvent
             )
 
             if (!matchResult.isMatch) {
-                val skippedLog = ExecutionLog(
-                    profileId = profile.id,
-                    profileName = profile.name,
-                    triggerType = event.type,
-                    status = "SKIPPED",
-                    skippedReason = matchResult.skippedReason,
-                    actionsResultJson = "[]",
-                    durationMs = 0L,
-                    timestamp = now
-                )
-                repository.insertLog(skippedLog)
-                logsWritten.add(skippedLog)
+                if (shouldRecordSkippedLog(matchResult.skippedReason)) {
+                    val skippedLog = ExecutionLog(
+                        profileId = profile.id,
+                        profileName = profile.name,
+                        triggerType = event.type,
+                        status = "SKIPPED",
+                        skippedReason = matchResult.skippedReason,
+                        actionsResultJson = "[]",
+                        durationMs = 0L,
+                        timestamp = now
+                    )
+                    val insertedId = repository.insertLog(skippedLog)
+                    logsWritten.add(skippedLog.copy(id = insertedId))
+                }
                 continue
             }
 
@@ -119,14 +124,18 @@ class AutoTaskEngine private constructor(
                 timestamp = now
             )
 
-            repository.insertLog(log)
-            logsWritten.add(log)
+            val insertedId = repository.insertLog(log)
+            logsWritten.add(log.copy(id = insertedId))
 
             // Update lastTriggeredAt timestamp
             repository.profileDao.updateLastTriggeredAt(profile.id, now)
         }
 
         return logsWritten
+    }
+
+    private fun shouldRecordSkippedLog(skippedReason: String): Boolean {
+        return skippedReason != "config_mismatch"
     }
 
     private fun collectCurrentDeviceState(): Map<String, Any?> {

@@ -44,7 +44,7 @@ googleid = "1.1.1"
 
 
 workRuntimeKtx = "2.9.0"
-ktor = "2.3.12"
+ktor = "3.0.3"
 
 
 [libraries]
