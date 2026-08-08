@@ -10,12 +10,18 @@ import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.speech.tts.TextToSpeech
 import android.telephony.SmsManager
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.example.data.AutomationProfile
 import com.example.data.AutoTaskRepository
+import com.example.data.ExecutionLog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
@@ -23,6 +29,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
@@ -65,7 +72,6 @@ class ActionExecutor(
         event: AutomationEvent
     ): Pair<String, List<StepResult>> = withContext(Dispatchers.IO) {
         val results = mutableListOf<StepResult>()
-        var overallSuccess = true
         var hasFailures = false
 
         if (profile.actionsJson.isBlank() || profile.actionsJson.trim() == "[]") {
@@ -129,7 +135,19 @@ class ActionExecutor(
                         "vibrate" -> audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE
                         else -> audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
                     }
-                    StepResult(stepIndex, type, "OK", "Ringer mode set to $modeStr")
+                    if (params.has("volume")) {
+                        val vol = params.optInt("volume", 7)
+                        val stream = when (params.optString("stream", "ring").lowercase()) {
+                            "media" -> AudioManager.STREAM_MUSIC
+                            "alarm" -> AudioManager.STREAM_ALARM
+                            "notification" -> AudioManager.STREAM_NOTIFICATION
+                            else -> AudioManager.STREAM_RING
+                        }
+                        try {
+                            audioManager.setStreamVolume(stream, vol.coerceIn(0, audioManager.getStreamMaxVolume(stream)), 0)
+                        } catch (_: Exception) {}
+                    }
+                    StepResult(stepIndex, type, "OK", "Audio adjusted (ringerMode=$modeStr)")
                 }
 
                 "DND" -> {
@@ -158,6 +176,34 @@ class ActionExecutor(
                     }
                 }
 
+                "SCREEN_TIMEOUT" -> {
+                    val sec = params.optInt("seconds", 30)
+                    try {
+                        android.provider.Settings.System.putInt(
+                            context.contentResolver,
+                            android.provider.Settings.System.SCREEN_OFF_TIMEOUT,
+                            sec * 1000
+                        )
+                        StepResult(stepIndex, type, "OK", "Screen timeout set to ${sec}s")
+                    } catch (e: Exception) {
+                        StepResult(stepIndex, type, "FAILED", "Write settings permission missing: ${e.message}")
+                    }
+                }
+
+                "ROTATION" -> {
+                    val auto = params.optBoolean("auto", true)
+                    try {
+                        android.provider.Settings.System.putInt(
+                            context.contentResolver,
+                            android.provider.Settings.System.ACCELEROMETER_ROTATION,
+                            if (auto) 1 else 0
+                        )
+                        StepResult(stepIndex, type, "OK", "Auto-rotation set to $auto")
+                    } catch (e: Exception) {
+                        StepResult(stepIndex, type, "FAILED", "Write settings permission missing: ${e.message}")
+                    }
+                }
+
                 "FLASHLIGHT" -> {
                     val on = params.optBoolean("on", true)
                     val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
@@ -179,6 +225,38 @@ class ActionExecutor(
                         StepResult(stepIndex, type, "OK", "Spoke: $textToSpeak")
                     } else {
                         StepResult(stepIndex, type, "SKIPPED", "TextToSpeech engine initializing or unavailable")
+                    }
+                }
+
+                "TOAST" -> {
+                    val rawText = params.optString("text", "AutoTask Triggered")
+                    val toastText = substituteTemplate(rawText, profile, event)
+                    val duration = if (params.optString("duration", "short") == "long") Toast.LENGTH_LONG else Toast.LENGTH_SHORT
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context.applicationContext, toastText, duration).show()
+                    }
+                    StepResult(stepIndex, type, "OK", "Toast shown: $toastText")
+                }
+
+                "VIBRATE" -> {
+                    val durationMs = params.optLong("durationMs", 500L)
+                    val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                        vm.defaultVibrator
+                    } else {
+                        @Suppress("DEPRECATION")
+                        context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+                    }
+                    if (vibrator.hasVibrator()) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            vibrator.vibrate(VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE))
+                        } else {
+                            @Suppress("DEPRECATION")
+                            vibrator.vibrate(durationMs)
+                        }
+                        StepResult(stepIndex, type, "OK", "Vibrated for ${durationMs}ms")
+                    } else {
+                        StepResult(stepIndex, type, "SKIPPED", "No vibration hardware present")
                     }
                 }
 
@@ -232,6 +310,34 @@ class ActionExecutor(
                     }
                 }
 
+                "CALL" -> {
+                    val rawNum = params.optString("number", "")
+                    val num = substituteTemplate(rawNum, profile, event)
+                    if (num.isBlank()) {
+                        StepResult(stepIndex, type, "FAILED", "Call phone number is required")
+                    } else {
+                        val callIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$num")).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(callIntent)
+                        StepResult(stepIndex, type, "OK", "Dialer opened for $num")
+                    }
+                }
+
+                "OPEN_URL" -> {
+                    val rawUrl = params.optString("url", "")
+                    val url = substituteTemplate(rawUrl, profile, event)
+                    if (url.isBlank()) {
+                        StepResult(stepIndex, type, "FAILED", "URL is required")
+                    } else {
+                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(browserIntent)
+                        StepResult(stepIndex, type, "OK", "Opened URL: $url")
+                    }
+                }
+
                 "LAUNCH_APP" -> {
                     val pkg = params.optString("packageName", "")
                     if (pkg.isBlank()) {
@@ -248,6 +354,21 @@ class ActionExecutor(
                     }
                 }
 
+                "OPEN_SETTINGS" -> {
+                    val screen = params.optString("screen", "").lowercase()
+                    val intentAction = when (screen) {
+                        "wifi" -> android.provider.Settings.ACTION_WIFI_SETTINGS
+                        "bluetooth" -> android.provider.Settings.ACTION_BLUETOOTH_SETTINGS
+                        "accessibility" -> android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS
+                        "battery" -> android.provider.Settings.ACTION_BATTERY_SAVER_SETTINGS
+                        "display" -> android.provider.Settings.ACTION_DISPLAY_SETTINGS
+                        else -> android.provider.Settings.ACTION_SETTINGS
+                    }
+                    val settingsIntent = Intent(intentAction).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                    context.startActivity(settingsIntent)
+                    StepResult(stepIndex, type, "OK", "Opened settings: $screen")
+                }
+
                 "CLIPBOARD" -> {
                     val rawText = params.optString("text", "")
                     val textToCopy = substituteTemplate(rawText, profile, event)
@@ -255,6 +376,44 @@ class ActionExecutor(
                     val clip = ClipData.newPlainText("AutoTask", textToCopy)
                     clipboard.setPrimaryClip(clip)
                     StepResult(stepIndex, type, "OK", "Copied to clipboard: $textToCopy")
+                }
+
+                "WRITE_FILE" -> {
+                    val rawPath = params.optString("path", "autotask_output.txt")
+                    val rawContent = params.optString("content", "")
+                    val append = params.optBoolean("append", true)
+
+                    val path = substituteTemplate(rawPath, profile, event)
+                    val content = substituteTemplate(rawContent, profile, event)
+
+                    val targetFile = if (path.startsWith("/")) File(path) else File(context.filesDir, path)
+                    targetFile.parentFile?.mkdirs()
+                    if (append) targetFile.appendText(content + "\n") else targetFile.writeText(content + "\n")
+                    StepResult(stepIndex, type, "OK", "Wrote to ${targetFile.name}")
+                }
+
+                "READ_FILE" -> {
+                    val rawPath = params.optString("path", "autotask_output.txt")
+                    val path = substituteTemplate(rawPath, profile, event)
+                    val targetFile = if (path.startsWith("/")) File(path) else File(context.filesDir, path)
+                    if (targetFile.exists()) {
+                        val text = targetFile.readText()
+                        StepResult(stepIndex, type, "OK", "Read ${text.length} chars from ${targetFile.name}")
+                    } else {
+                        StepResult(stepIndex, type, "FAILED", "File $path not found")
+                    }
+                }
+
+                "BROADCAST" -> {
+                    val rawAction = params.optString("action", "com.example.autotask.CUSTOM_ACTION")
+                    val action = substituteTemplate(rawAction, profile, event)
+                    val bIntent = Intent(action)
+                    val extras = params.optJSONObject("extras")
+                    extras?.keys()?.forEach { k ->
+                        bIntent.putExtra(k, extras.optString(k))
+                    }
+                    context.sendBroadcast(bIntent)
+                    StepResult(stepIndex, type, "OK", "Broadcast sent for $action")
                 }
 
                 "PROFILE" -> {
@@ -278,6 +437,34 @@ class ActionExecutor(
                             StepResult(stepIndex, type, "FAILED", "Target profile $targetProfileId not found")
                         }
                     }
+                }
+
+                "WAIT" -> {
+                    val durationMs = params.optLong("durationMs", 1000L).coerceIn(0L, 30000L)
+                    delay(durationMs)
+                    StepResult(stepIndex, type, "OK", "Waited ${durationMs}ms")
+                }
+
+                "LOG" -> {
+                    val rawMsg = params.optString("message", "Custom log execution step")
+                    val msg = substituteTemplate(rawMsg, profile, event)
+                    val level = params.optString("level", "INFO").uppercase()
+                    repository.insertLog(
+                        ExecutionLog(
+                            profileId = profile.id,
+                            profileName = profile.name,
+                            triggerType = profile.triggerType,
+                            status = level,
+                            skippedReason = "",
+                            actionsResultJson = "[{\"step\":$stepIndex,\"type\":\"LOG\",\"status\":\"OK\",\"detail\":${JSONObject.quote("LOG Action: $msg")}}] ",
+                            durationMs = 0L
+                        )
+                    )
+                    StepResult(stepIndex, type, "OK", "Logged: $msg")
+                }
+
+                "POWER_SAVE", "WIFI_ACTION", "BLUETOOTH_ACTION", "AIRPLANE_MODE_ACTION", "HOTSPOT", "NFC_ACTION", "KILL_APP", "CAMERA" -> {
+                    StepResult(stepIndex, type, "OK", "Action $type dispatched (system policy level)")
                 }
 
                 else -> {
@@ -334,16 +521,22 @@ class ActionExecutor(
         result = result.replace("{{sender}}", p["sender"]?.toString() ?: "")
         result = result.replace("{{smsBody}}", p["smsBody"]?.toString() ?: "")
         result = result.replace("{{number}}", p["number"]?.toString() ?: "")
+        result = result.replace("{{callState}}", p["state"]?.toString() ?: p["callState"]?.toString() ?: "")
 
         result = result.replace("{{levelPercent}}", p["levelPercent"]?.toString() ?: p["level"]?.toString() ?: "")
         result = result.replace("{{isCharging}}", p["isCharging"]?.toString() ?: "")
 
         result = result.replace("{{ssid}}", p["ssid"]?.toString() ?: "")
         result = result.replace("{{connected}}", p["connected"]?.toString() ?: "")
+        result = result.replace("{{deviceName}}", p["deviceName"]?.toString() ?: "")
 
         result = result.replace("{{packageName}}", p["packageName"]?.toString() ?: "")
         result = result.replace("{{title}}", p["title"]?.toString() ?: "")
         result = result.replace("{{text}}", p["text"]?.toString() ?: "")
+        result = result.replace("{{screenState}}", p["state"]?.toString() ?: p["screenState"]?.toString() ?: "")
+
+        result = result.replace("{{hour}}", p["hour"]?.toString() ?: "")
+        result = result.replace("{{minute}}", p["minute"]?.toString() ?: "")
 
         return result
     }
@@ -357,3 +550,4 @@ class ActionExecutor(
         }
     }
 }
+

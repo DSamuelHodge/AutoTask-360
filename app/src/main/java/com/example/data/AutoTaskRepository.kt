@@ -12,7 +12,7 @@ class AutoTaskRepository(context: Context) {
     val logsFlow: Flow<List<ExecutionLog>> = logDao.getLogsFlow(100)
 
     suspend fun seedDefaultRecipesIfNeeded() {
-        if (profileDao.getProfileCount() == 0) {
+        if (profileDao.getProfileCount() <= 5) {
             val starterProfiles = PolicySeeder.getStarterProfiles()
             profileDao.insertProfiles(starterProfiles)
         }

@@ -7,6 +7,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,18 +27,31 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Power
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SettingsSuggest
 import androidx.compose.material.icons.filled.Sms
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -42,6 +59,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -74,6 +93,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.AutomationProfile
 import com.example.data.ExecutionLog
+import com.example.engine.SchemaProvider
 import com.example.ui.theme.HighDensityErrorContainer
 import com.example.ui.theme.HighDensityErrorRed
 import com.example.ui.theme.HighDensityOnErrorContainer
@@ -85,10 +105,31 @@ import com.example.ui.theme.HighDensityPrimaryContainer
 import com.example.ui.theme.HighDensitySuccessGreen
 import com.example.ui.theme.HighDensitySurface
 import com.example.ui.theme.HighDensitySurfaceVariant
+import org.json.JSONArray
+import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+data class CatalogueTriggerItem(
+    val type: String,
+    val source: String,
+    val description: String,
+    val state: String,
+    val configKeysMap: Map<String, String>,
+    val templateVars: List<String>,
+    val category: String
+)
+
+data class CatalogueActionItem(
+    val type: String,
+    val description: String,
+    val paramsMap: Map<String, String>,
+    val notes: String,
+    val category: String
+)
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AutoTaskMainScreen(viewModel: AutoTaskViewModel) {
     val profiles by viewModel.profiles.collectAsState()
@@ -97,9 +138,15 @@ fun AutoTaskMainScreen(viewModel: AutoTaskViewModel) {
     val apiTestResponse by viewModel.apiTestResponse.collectAsState()
     val isApiTestLoading by viewModel.isApiTestLoading.collectAsState()
 
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Policies, 1: Logs, 2: Events, 3: Status/API
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: Policies, 1: Catalogue, 2: Logs, 3: Events, 4: Status
     var showAddDialog by remember { mutableStateOf(false) }
+    var editingProfile by remember { mutableStateOf<AutomationProfile?>(null) }
+    var preselectedTriggerForNewPolicy by remember { mutableStateOf<String?>(null) }
+    var preselectedActionForNewPolicy by remember { mutableStateOf<String?>(null) }
     var selectedJsonProfile by remember { mutableStateOf<AutomationProfile?>(null) }
+
+    // Parse Schema
+    val (catalogueTriggers, catalogueActions) = remember { parseSchemaData() }
 
     Scaffold(
         bottomBar = {
@@ -110,9 +157,10 @@ fun AutoTaskMainScreen(viewModel: AutoTaskViewModel) {
                     .height(72.dp)
                     .border(1.dp, HighDensitySurfaceVariant)
             ) {
-                val tabs = listOf("POLICIES", "LOGS", "EVENTS", "STATUS")
+                val tabs = listOf("POLICIES", "CATALOGUE", "LOGS", "EVENTS", "STATUS")
                 val icons = listOf(
                     Icons.Default.SettingsSuggest,
+                    Icons.Default.Category,
                     Icons.Default.History,
                     Icons.Default.Terminal,
                     Icons.Default.Info
@@ -126,7 +174,7 @@ fun AutoTaskMainScreen(viewModel: AutoTaskViewModel) {
                         label = {
                             Text(
                                 text = label,
-                                fontSize = 10.sp,
+                                fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         },
@@ -156,16 +204,18 @@ fun AutoTaskMainScreen(viewModel: AutoTaskViewModel) {
                 onToggleService = { viewModel.toggleService(it) }
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             // Metric Overview Cards
             MetricsSection(
                 activeProfilesCount = profiles.count { it.isEnabled },
                 totalProfilesCount = profiles.size,
+                triggersCount = catalogueTriggers.size,
+                actionsCount = catalogueActions.size,
                 logsCount = logs.size
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             // Main Content Card Container
             Card(
@@ -182,22 +232,45 @@ fun AutoTaskMainScreen(viewModel: AutoTaskViewModel) {
                             profiles = profiles,
                             onToggleProfile = { id, enabled -> viewModel.toggleProfileEnabled(id, enabled) },
                             onFireManual = { id -> viewModel.fireManualEvent(id) },
+                            onEditProfile = { profile -> editingProfile = profile },
                             onDeleteProfile = { id -> viewModel.deleteProfile(id) },
                             onShowJson = { profile -> selectedJsonProfile = profile },
-                            onOpenAddDialog = { showAddDialog = true }
+                            onOpenAddDialog = {
+                                preselectedTriggerForNewPolicy = null
+                                preselectedActionForNewPolicy = null
+                                editingProfile = null
+                                showAddDialog = true
+                            }
                         )
 
-                        1 -> LogsTab(
+                        1 -> CatalogueTab(
+                            triggers = catalogueTriggers,
+                            actions = catalogueActions,
+                            onCreatePolicyWithTrigger = { triggerType ->
+                                preselectedTriggerForNewPolicy = triggerType
+                                preselectedActionForNewPolicy = null
+                                editingProfile = null
+                                showAddDialog = true
+                            },
+                            onCreatePolicyWithAction = { actionType ->
+                                preselectedTriggerForNewPolicy = null
+                                preselectedActionForNewPolicy = actionType
+                                editingProfile = null
+                                showAddDialog = true
+                            }
+                        )
+
+                        2 -> LogsTab(
                             logs = logs,
                             onClearLogs = { viewModel.clearLogs() }
                         )
 
-                        2 -> EventsTab(
-                            onFireEvent = { type -> viewModel.fireManualEvent() },
+                        3 -> EventsTab(
+                            triggers = catalogueTriggers,
                             viewModel = viewModel
                         )
 
-                        3 -> StatusTab(
+                        4 -> StatusTab(
                             isServiceRunning = isServiceRunning,
                             logs = logs,
                             apiTestResponse = apiTestResponse,
@@ -212,12 +285,21 @@ fun AutoTaskMainScreen(viewModel: AutoTaskViewModel) {
         }
     }
 
-    if (showAddDialog) {
-        AddProfileDialog(
-            onDismiss = { showAddDialog = false },
-            onSave = { newProf ->
-                viewModel.upsertProfile(newProf)
+    if (showAddDialog || editingProfile != null) {
+        PolicyEditorDialog(
+            existingProfile = editingProfile,
+            preselectedTrigger = preselectedTriggerForNewPolicy,
+            preselectedAction = preselectedActionForNewPolicy,
+            triggers = catalogueTriggers,
+            actions = catalogueActions,
+            onDismiss = {
                 showAddDialog = false
+                editingProfile = null
+            },
+            onSave = { updatedProf ->
+                viewModel.upsertProfile(updatedProf)
+                showAddDialog = false
+                editingProfile = null
             }
         )
     }
@@ -230,6 +312,84 @@ fun AutoTaskMainScreen(viewModel: AutoTaskViewModel) {
     }
 }
 
+private fun parseSchemaData(): Pair<List<CatalogueTriggerItem>, List<CatalogueActionItem>> {
+    val triggers = mutableListOf<CatalogueTriggerItem>()
+    val actions = mutableListOf<CatalogueActionItem>()
+
+    try {
+        val root = JSONObject(SchemaProvider.getSchemaJson())
+
+        val triggerObj = root.optJSONObject("triggerTypes") ?: JSONObject()
+        val triggerKeys = triggerObj.keys()
+        while (triggerKeys.hasNext()) {
+            val key = triggerKeys.next()
+            val t = triggerObj.getJSONObject(key)
+            val source = t.optString("source", "System")
+            val desc = t.optString("description", "")
+            val state = t.optString("state", "delivery-ready")
+
+            val cfgObj = t.optJSONObject("configKeys") ?: JSONObject()
+            val cfgMap = mutableMapOf<String, String>()
+            cfgObj.keys().forEach { k -> cfgMap[k] = cfgObj.optString(k) }
+
+            val varsArr = t.optJSONArray("templateVars") ?: JSONArray()
+            val varsList = mutableListOf<String>()
+            for (i in 0 until varsArr.length()) {
+                varsList.add(varsArr.getString(i))
+            }
+
+            val category = when (key) {
+                "TIME", "SCHEDULE", "SUNRISE_SUNSET" -> "TIME/SCHEDULE"
+                "BATTERY", "POWER", "POWER_SAVE" -> "POWER"
+                "WIFI", "AIRPLANE_MODE", "MOBILE_DATA" -> "NETWORK"
+                "BLUETOOTH", "BLUETOOTH_STATE" -> "BLUETOOTH"
+                "SCREEN", "DEVICE_UNLOCKED", "DOZE", "DREAMING" -> "DEVICE"
+                "APP_LAUNCH", "PACKAGE_CHANGED", "FOREGROUND_APP" -> "APP"
+                "INCOMING_CALL", "OUTGOING_CALL", "SMS", "SIGNAL_STRENGTH", "CALL" -> "TELEPHONY"
+                "NOTIFICATION", "NOTIFICATION_REMOVED" -> "NOTIFICATIONS"
+                "LOCATION", "ACTIVITY_RECOGNITION" -> "LOCATION"
+                "HEADSET", "USB", "VOLUME_BUTTON", "CAMERA_BUTTON", "NFC" -> "HARDWARE"
+                "SHAKE", "PROXIMITY", "LIGHT", "STEP", "PRESSURE", "TEMPERATURE" -> "SENSORS"
+                "CALENDAR_EVENT", "MEETING" -> "CALENDAR"
+                else -> "SYSTEM"
+            }
+
+            triggers.add(CatalogueTriggerItem(key, source, desc, state, cfgMap, varsList, category))
+        }
+
+        val actionObj = root.optJSONObject("actionTypes") ?: JSONObject()
+        val actionKeys = actionObj.keys()
+        while (actionKeys.hasNext()) {
+            val key = actionKeys.next()
+            val a = actionObj.getJSONObject(key)
+            val desc = a.optString("description", "")
+            val notes = a.optString("notes", "")
+
+            val pObj = a.optJSONObject("params") ?: JSONObject()
+            val pMap = mutableMapOf<String, String>()
+            pObj.keys().forEach { k -> pMap[k] = pObj.optString(k) }
+
+            val category = when (key) {
+                "AUDIO", "DND", "BRIGHTNESS", "SCREEN_TIMEOUT", "ROTATION", "POWER_SAVE" -> "DEVICE SETTINGS"
+                "WIFI_ACTION", "BLUETOOTH_ACTION", "AIRPLANE_MODE_ACTION", "HOTSPOT", "NFC_ACTION" -> "CONNECTIVITY"
+                "NOTIFICATION", "SPEAK", "TOAST", "VIBRATE" -> "ALERTS/MEDIA"
+                "SEND_SMS", "CALL", "OPEN_URL" -> "COMMUNICATION"
+                "LAUNCH_APP", "KILL_APP", "OPEN_SETTINGS" -> "APP CONTROL"
+                "FLASHLIGHT", "CLIPBOARD", "CAMERA" -> "HARDWARE"
+                "HTTP", "WRITE_FILE", "READ_FILE", "BROADCAST" -> "DATA/INTEGRATION"
+                else -> "AUTOMATION"
+            }
+
+            actions.add(CatalogueActionItem(key, desc, pMap, notes, category))
+        }
+
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+
+    return Pair(triggers, actions)
+}
+
 @Composable
 private fun HeaderSection(
     isRunning: Boolean,
@@ -238,7 +398,7 @@ private fun HeaderSection(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .padding(vertical = 2.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -252,7 +412,7 @@ private fun HeaderSection(
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.padding(top = 2.dp)
+                modifier = Modifier.padding(top = 1.dp)
             ) {
                 Box(
                     modifier = Modifier
@@ -307,34 +467,64 @@ private fun HeaderSection(
 private fun MetricsSection(
     activeProfilesCount: Int,
     totalProfilesCount: Int,
+    triggersCount: Int,
+    actionsCount: Int,
     logsCount: Int
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Card(
             colors = CardDefaults.cardColors(containerColor = HighDensitySurfaceVariant),
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier
                 .weight(1f)
-                .height(72.dp)
+                .height(68.dp)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(10.dp),
+                    .padding(8.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
                     text = "ACTIVE POLICIES",
-                    fontSize = 9.sp,
+                    fontSize = 8.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = HighDensityOnSurfaceVariant
                 )
                 Text(
                     text = "$activeProfilesCount / $totalProfilesCount",
-                    fontSize = 20.sp,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = HighDensityOnPrimaryContainer
+                )
+            }
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = HighDensityPrimaryContainer),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .weight(1.2f)
+                .height(68.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(8.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "CATALOGUE SCOPE",
+                    fontSize = 8.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = HighDensityOnPrimaryContainer
+                )
+                Text(
+                    text = "$triggersCount Triggers • $actionsCount Actions",
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = HighDensityOnPrimaryContainer
                 )
@@ -346,23 +536,23 @@ private fun MetricsSection(
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier
                 .weight(1f)
-                .height(72.dp)
+                .height(68.dp)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(10.dp),
+                    .padding(8.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
                     text = "EXECUTION LOGS",
-                    fontSize = 9.sp,
+                    fontSize = 8.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = HighDensityOnSurfaceVariant
                 )
                 Text(
                     text = "$logsCount",
-                    fontSize = 20.sp,
+                    fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = HighDensityOnErrorContainer
                 )
@@ -376,6 +566,7 @@ private fun PoliciesTab(
     profiles: List<AutomationProfile>,
     onToggleProfile: (String, Boolean) -> Unit,
     onFireManual: (String?) -> Unit,
+    onEditProfile: (AutomationProfile) -> Unit,
     onDeleteProfile: (String) -> Unit,
     onShowJson: (AutomationProfile) -> Unit,
     onOpenAddDialog: () -> Unit
@@ -386,17 +577,24 @@ private fun PoliciesTab(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "AUTOMATION POLICIES",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = HighDensityOnSurface
-            )
+            Column {
+                Text(
+                    text = "AUTOMATION POLICIES",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = HighDensityOnSurface
+                )
+                Text(
+                    text = "${profiles.size} configured policy profiles",
+                    fontSize = 9.sp,
+                    color = HighDensityOnSurfaceVariant
+                )
+            }
 
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedButton(
                     onClick = { onFireManual(null) },
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                     modifier = Modifier.height(32.dp).testTag("fire_all_button")
                 ) {
                     Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
@@ -407,12 +605,12 @@ private fun PoliciesTab(
                 Button(
                     onClick = onOpenAddDialog,
                     colors = ButtonDefaults.buttonColors(containerColor = HighDensityPrimary),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                     modifier = Modifier.height(32.dp).testTag("add_policy_button")
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("NEW", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("NEW POLICY", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -436,6 +634,7 @@ private fun PoliciesTab(
                         profile = profile,
                         onToggle = { onToggleProfile(profile.id, profile.isEnabled) },
                         onRun = { onFireManual(profile.id) },
+                        onEdit = { onEditProfile(profile) },
                         onDelete = { onDeleteProfile(profile.id) },
                         onShowJson = { onShowJson(profile) }
                     )
@@ -450,13 +649,19 @@ private fun PolicyCard(
     profile: AutomationProfile,
     onToggle: () -> Unit,
     onRun: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
     onShowJson: () -> Unit
 ) {
     val triggerIcon: ImageVector = when (profile.triggerType) {
-        "BATTERY" -> Icons.Default.BatteryChargingFull
-        "WIFI" -> Icons.Default.Wifi
+        "BATTERY", "POWER", "POWER_SAVE" -> Icons.Default.BatteryChargingFull
+        "WIFI", "AIRPLANE_MODE" -> Icons.Default.Wifi
+        "BLUETOOTH", "BLUETOOTH_STATE" -> Icons.Default.Bluetooth
         "SMS" -> Icons.Default.Sms
+        "INCOMING_CALL", "CALL" -> Icons.Default.Call
+        "SCREEN", "DEVICE_UNLOCKED" -> Icons.Default.Smartphone
+        "HEADSET" -> Icons.Default.Headset
+        "LIGHT" -> Icons.Default.Lightbulb
         else -> Icons.Default.SettingsSuggest
     }
 
@@ -535,6 +740,9 @@ private fun PolicyCard(
                     IconButton(onClick = onRun, modifier = Modifier.size(28.dp)) {
                         Icon(Icons.Default.PlayArrow, contentDescription = "Run", tint = HighDensityPrimary, modifier = Modifier.size(16.dp))
                     }
+                    IconButton(onClick = onEdit, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Edit, contentDescription = "Edit", tint = HighDensityPrimary, modifier = Modifier.size(16.dp))
+                    }
                     IconButton(onClick = onShowJson, modifier = Modifier.size(28.dp)) {
                         Icon(Icons.Default.Code, contentDescription = "JSON", tint = HighDensityOnSurfaceVariant, modifier = Modifier.size(16.dp))
                     }
@@ -542,6 +750,348 @@ private fun PolicyCard(
                         Icon(Icons.Default.Delete, contentDescription = "Delete", tint = HighDensityErrorRed, modifier = Modifier.size(16.dp))
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CatalogueTab(
+    triggers: List<CatalogueTriggerItem>,
+    actions: List<CatalogueActionItem>,
+    onCreatePolicyWithTrigger: (String) -> Unit,
+    onCreatePolicyWithAction: (String) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedTypeFilter by remember { mutableStateOf("ALL") } // ALL, TRIGGERS, ACTIONS
+    var selectedCategory by remember { mutableStateOf("ALL") }
+
+    val categories = remember(triggers, actions) {
+        val set = mutableSetOf("ALL")
+        triggers.forEach { set.add(it.category) }
+        actions.forEach { set.add(it.category) }
+        set.toList().sorted()
+    }
+
+    val filteredTriggers = remember(triggers, searchQuery, selectedTypeFilter, selectedCategory) {
+        if (selectedTypeFilter == "ACTIONS") emptyList()
+        else triggers.filter {
+            (selectedCategory == "ALL" || it.category == selectedCategory) &&
+                    (searchQuery.isBlank() || it.type.contains(searchQuery, ignoreCase = true) ||
+                            it.description.contains(searchQuery, ignoreCase = true) ||
+                            it.source.contains(searchQuery, ignoreCase = true))
+        }
+    }
+
+    val filteredActions = remember(actions, searchQuery, selectedTypeFilter, selectedCategory) {
+        if (selectedTypeFilter == "TRIGGERS") emptyList()
+        else actions.filter {
+            (selectedCategory == "ALL" || it.category == selectedCategory) &&
+                    (searchQuery.isBlank() || it.type.contains(searchQuery, ignoreCase = true) ||
+                            it.description.contains(searchQuery, ignoreCase = true))
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "TRIGGER & ACTION CATALOGUE",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = HighDensityOnSurface
+                )
+                Text(
+                    text = "44 Trigger Types • 31 Action Types across System APIs",
+                    fontSize = 9.sp,
+                    color = HighDensityOnSurfaceVariant
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Search Bar
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            placeholder = { Text("Search triggers & actions...", fontSize = 11.sp) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Type Filter Pills
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            listOf("ALL (${triggers.size + actions.size})", "TRIGGERS (${triggers.size})", "ACTIONS (${actions.size})").forEach { label ->
+                val typeKey = when {
+                    label.startsWith("TRIGGERS") -> "TRIGGERS"
+                    label.startsWith("ACTIONS") -> "ACTIONS"
+                    else -> "ALL"
+                }
+                OutlinedButton(
+                    onClick = { selectedTypeFilter = typeKey },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (selectedTypeFilter == typeKey) HighDensityPrimaryContainer else Color.Transparent
+                    ),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.height(28.dp)
+                ) {
+                    Text(label, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Category Filter Horizontal Row
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            items(categories) { cat ->
+                OutlinedButton(
+                    onClick = { selectedCategory = cat },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (selectedCategory == cat) HighDensityPrimaryContainer else Color.Transparent
+                    ),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.height(26.dp)
+                ) {
+                    Text(cat, fontSize = 8.5.sp, fontWeight = if (selectedCategory == cat) FontWeight.Bold else FontWeight.Normal)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            if (filteredTriggers.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "TRIGGERS (${filteredTriggers.size})",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = HighDensityPrimary
+                    )
+                }
+                items(filteredTriggers, key = { "trig_${it.type}" }) { item ->
+                    CatalogueTriggerCard(item = item, onCreatePolicy = { onCreatePolicyWithTrigger(item.type) })
+                }
+            }
+
+            if (filteredActions.isNotEmpty()) {
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "ACTIONS (${filteredActions.size})",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = HighDensityPrimary
+                    )
+                }
+                items(filteredActions, key = { "act_${it.type}" }) { item ->
+                    CatalogueActionCard(item = item, onCreatePolicy = { onCreatePolicyWithAction(item.type) })
+                }
+            }
+
+            if (filteredTriggers.isEmpty() && filteredActions.isEmpty()) {
+                item {
+                    Box(modifier = Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
+                        Text("No matching triggers or actions found", fontSize = 11.sp, color = HighDensityOnSurfaceVariant)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CatalogueTriggerCard(
+    item: CatalogueTriggerItem,
+    onCreatePolicy: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(12.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, HighDensitySurfaceVariant),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(HighDensityPrimaryContainer)
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text("TRIGGER", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = HighDensityOnPrimaryContainer)
+                    }
+
+                    Text(
+                        text = item.type,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = HighDensityOnPrimaryContainer
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(
+                            when (item.state) {
+                                "delivery-ready" -> HighDensitySuccessGreen.copy(alpha = 0.15f)
+                                "policy-ready" -> HighDensityPrimaryContainer
+                                else -> HighDensitySurfaceVariant
+                            }
+                        )
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = item.state,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = when (item.state) {
+                            "delivery-ready" -> HighDensitySuccessGreen
+                            else -> HighDensityOnSurfaceVariant
+                        }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(text = item.description, fontSize = 10.sp, color = HighDensityOnSurface)
+            Text(text = "Source: ${item.source}", fontSize = 9.sp, color = HighDensityOnSurfaceVariant)
+
+            if (item.configKeysMap.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Config Keys: ${item.configKeysMap.entries.joinToString { "${it.key}: ${it.value}" }}",
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = HighDensityOnSurfaceVariant
+                )
+            }
+
+            if (item.templateVars.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Vars: ${item.templateVars.joinToString(", ")}",
+                    fontSize = 8.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = HighDensityPrimary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            OutlinedButton(
+                onClick = onCreatePolicy,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                modifier = Modifier.height(26.dp).align(Alignment.End)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(12.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("CREATE POLICY WITH THIS", fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CatalogueActionCard(
+    item: CatalogueActionItem,
+    onCreatePolicy: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(12.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, HighDensitySurfaceVariant),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFFE1BEE7))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text("ACTION", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4A148C))
+                    }
+
+                    Text(
+                        text = item.type,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = HighDensityOnPrimaryContainer
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(HighDensitySurfaceVariant)
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = item.category,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = HighDensityOnSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(text = item.description, fontSize = 10.sp, color = HighDensityOnSurface)
+
+            if (item.paramsMap.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Params: ${item.paramsMap.entries.joinToString { "${it.key}: ${it.value}" }}",
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = HighDensityOnSurfaceVariant
+                )
+            }
+
+            if (item.notes.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(text = "Note: ${item.notes}", fontSize = 8.5.sp, color = HighDensityErrorRed)
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            OutlinedButton(
+                onClick = onCreatePolicy,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                modifier = Modifier.height(26.dp).align(Alignment.End)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(12.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("CREATE POLICY WITH THIS", fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -567,7 +1117,7 @@ private fun LogsTab(
 
             TextButton(
                 onClick = onClearLogs,
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                 modifier = Modifier.height(28.dp).testTag("clear_logs_button")
             ) {
                 Text("CLEAR ALL", fontSize = 10.sp, color = HighDensityErrorRed, fontWeight = FontWeight.Bold)
@@ -596,7 +1146,7 @@ private fun LogsTab(
 @Composable
 private fun LogCard(log: ExecutionLog) {
     val statusColor = when (log.status) {
-        "SUCCESS" -> HighDensitySuccessGreen
+        "SUCCESS", "OK", "INFO" -> HighDensitySuccessGreen
         "FAILED" -> HighDensityErrorRed
         else -> HighDensityOnSurfaceVariant
     }
@@ -675,17 +1225,20 @@ private fun LogCard(log: ExecutionLog) {
 
 @Composable
 private fun EventsTab(
-    onFireEvent: (String) -> Unit,
+    triggers: List<CatalogueTriggerItem>,
     viewModel: AutoTaskViewModel
 ) {
     var selectedTrigger by remember { mutableStateOf("BATTERY") }
     var customPayloadJson by remember { mutableStateOf("{\n  \"level\": 12,\n  \"isCharging\": false\n}") }
+    var showAllTriggersDropdown by remember { mutableStateOf(false) }
+
+    val quickTriggers = listOf("BATTERY", "POWER_SAVE", "WIFI", "BLUETOOTH", "SCREEN", "HEADSET", "INCOMING_CALL", "SMS")
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
             text = "EVENT DISPATCHER & SIMULATION",
@@ -695,35 +1248,29 @@ private fun EventsTab(
         )
 
         Text(
-            text = "Simulate broadcast events or fire manual triggers directly into AutoTaskEngine:",
+            text = "Simulate broadcast events or fire manual triggers directly into AutoTaskEngine for all 44 trigger types:",
             fontSize = 10.sp,
             color = HighDensityOnSurfaceVariant
         )
 
-        val triggerTypes = listOf("BATTERY", "WIFI", "SMS", "SCREEN", "CALL", "TIME", "BOOT", "MANUAL")
+        // Quick Trigger Buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            triggerTypes.take(4).forEach { type ->
+            quickTriggers.take(4).forEach { type ->
                 OutlinedButton(
                     onClick = {
                         selectedTrigger = type
-                        customPayloadJson = when (type) {
-                            "BATTERY" -> "{\n  \"level\": 12,\n  \"isCharging\": false\n}"
-                            "WIFI" -> "{\n  \"ssid\": \"HomeNetwork\",\n  \"connected\": true\n}"
-                            "SMS" -> "{\n  \"sender\": \"+15550199\",\n  \"smsBody\": \"URGENT alert test\"\n}"
-                            "SCREEN" -> "{\n  \"state\": \"ON\"\n}"
-                            else -> "{}"
-                        }
+                        customPayloadJson = getSamplePayloadForTrigger(type)
                     },
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = if (selectedTrigger == type) HighDensityPrimaryContainer else Color.Transparent
                     ),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(4.dp),
-                    modifier = Modifier.weight(1f).height(32.dp)
+                    contentPadding = PaddingValues(2.dp),
+                    modifier = Modifier.weight(1f).height(30.dp)
                 ) {
-                    Text(type, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text(type, fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -732,24 +1279,46 @@ private fun EventsTab(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            triggerTypes.drop(4).forEach { type ->
+            quickTriggers.drop(4).forEach { type ->
                 OutlinedButton(
                     onClick = {
                         selectedTrigger = type
-                        customPayloadJson = when (type) {
-                            "CALL" -> "{\n  \"state\": \"RINGING\",\n  \"number\": \"+15550122\"\n}"
-                            "TIME" -> "{\n  \"hour\": 22,\n  \"minute\": 0\n}"
-                            "BOOT" -> "{\n  \"bootTimestamp\": ${System.currentTimeMillis()}\n}"
-                            else -> "{}"
-                        }
+                        customPayloadJson = getSamplePayloadForTrigger(type)
                     },
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = if (selectedTrigger == type) HighDensityPrimaryContainer else Color.Transparent
                     ),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(4.dp),
-                    modifier = Modifier.weight(1f).height(32.dp)
+                    contentPadding = PaddingValues(2.dp),
+                    modifier = Modifier.weight(1f).height(30.dp)
                 ) {
-                    Text(type, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text(type, fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // Dropdown for all 44 Triggers
+        Box {
+            OutlinedButton(
+                onClick = { showAllTriggersDropdown = true },
+                modifier = Modifier.fillMaxWidth().height(36.dp)
+            ) {
+                Text("SELECT FROM ALL 44 TRIGGERS (Current: $selectedTrigger)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+
+            DropdownMenu(
+                expanded = showAllTriggersDropdown,
+                onDismissRequest = { showAllTriggersDropdown = false },
+                modifier = Modifier.height(280.dp)
+            ) {
+                triggers.forEach { trig ->
+                    DropdownMenuItem(
+                        text = { Text("${trig.type} • ${trig.category}", fontSize = 10.sp) },
+                        onClick = {
+                            selectedTrigger = trig.type
+                            customPayloadJson = getSamplePayloadForTrigger(trig.type)
+                            showAllTriggersDropdown = false
+                        }
+                    )
                 }
             }
         }
@@ -777,6 +1346,25 @@ private fun EventsTab(
             Spacer(modifier = Modifier.width(6.dp))
             Text("DISPATCH $selectedTrigger EVENT", fontSize = 11.sp, fontWeight = FontWeight.Bold)
         }
+    }
+}
+
+private fun getSamplePayloadForTrigger(type: String): String {
+    return when (type) {
+        "BATTERY" -> "{\n  \"level\": 12,\n  \"isCharging\": false,\n  \"isLow\": true\n}"
+        "POWER" -> "{\n  \"connected\": true\n}"
+        "POWER_SAVE" -> "{\n  \"enabled\": true\n}"
+        "WIFI" -> "{\n  \"ssid\": \"HomeNetwork\",\n  \"connected\": true\n}"
+        "BLUETOOTH" -> "{\n  \"deviceName\": \"AirPods Pro\",\n  \"connected\": true\n}"
+        "SMS" -> "{\n  \"sender\": \"+15550199\",\n  \"smsBody\": \"URGENT status report requested\"\n}"
+        "INCOMING_CALL", "CALL" -> "{\n  \"state\": \"RINGING\",\n  \"number\": \"+15550122\"\n}"
+        "SCREEN" -> "{\n  \"state\": \"ON\"\n}"
+        "DEVICE_UNLOCKED" -> "{\n  \"timestamp\": ${System.currentTimeMillis()}\n}"
+        "HEADSET" -> "{\n  \"connected\": true,\n  \"hasMicrophone\": true\n}"
+        "LIGHT" -> "{\n  \"lux\": 8.5,\n  \"belowLux\": 10\n}"
+        "TIME" -> "{\n  \"hour\": 22,\n  \"minute\": 0\n}"
+        "BOOT" -> "{\n  \"timestamp\": ${System.currentTimeMillis()}\n}"
+        else -> "{\n  \"active\": true,\n  \"state\": \"ON\"\n}"
     }
 }
 
@@ -838,7 +1426,7 @@ private fun StatusTab(
                         colors = ButtonDefaults.outlinedButtonColors(
                             containerColor = if (selectedMethod == m) HighDensityPrimaryContainer else Color.Transparent
                         ),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(2.dp),
+                        contentPadding = PaddingValues(2.dp),
                         modifier = Modifier.weight(1f).height(30.dp)
                     ) {
                         Text(m, fontSize = 9.sp, fontWeight = FontWeight.Bold)
@@ -858,7 +1446,7 @@ private fun StatusTab(
                         colors = ButtonDefaults.outlinedButtonColors(
                             containerColor = if (selectedEndpoint == ep) HighDensityPrimaryContainer else Color.Transparent
                         ),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(2.dp),
+                        contentPadding = PaddingValues(2.dp),
                         modifier = Modifier.weight(1f).height(30.dp)
                     ) {
                         Text(ep.removePrefix("/v1/"), fontSize = 9.sp)
@@ -916,43 +1504,141 @@ private fun StatusTab(
 }
 
 @Composable
-private fun AddProfileDialog(
+private fun PolicyEditorDialog(
+    existingProfile: AutomationProfile?,
+    preselectedTrigger: String?,
+    preselectedAction: String?,
+    triggers: List<CatalogueTriggerItem>,
+    actions: List<CatalogueActionItem>,
     onDismiss: () -> Unit,
     onSave: (AutomationProfile) -> Unit
 ) {
-    var id by remember { mutableStateOf("profile_${System.currentTimeMillis() % 10000}") }
-    var name by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-    var triggerType by remember { mutableStateOf("BATTERY") }
-    var triggerConfig by remember { mutableStateOf("{\n  \"level\": 15,\n  \"operator\": \"LESS_THAN\"\n}") }
+    var id by remember { mutableStateOf(existingProfile?.id ?: "policy_${System.currentTimeMillis() % 100000}") }
+    var name by remember { mutableStateOf(existingProfile?.name ?: "") }
+    var description by remember { mutableStateOf(existingProfile?.description ?: "") }
+    var triggerType by remember { mutableStateOf(existingProfile?.triggerType ?: preselectedTrigger ?: "BATTERY") }
+    var triggerConfig by remember {
+        mutableStateOf(
+            existingProfile?.triggerConfigJson ?: getSamplePayloadForTrigger(triggerType)
+        )
+    }
+
+    var selectedActionType by remember { mutableStateOf(preselectedAction ?: "NOTIFICATION") }
+    var actionsJson by remember {
+        mutableStateOf(
+            existingProfile?.actionsJson ?: getDefaultActionsJsonForAction(selectedActionType)
+        )
+    }
+
+    var showTriggerDropdown by remember { mutableStateOf(false) }
+    var showActionDropdown by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New Automation Policy", fontSize = 14.sp, fontWeight = FontWeight.Bold) },
+        title = {
+            Text(
+                text = if (existingProfile != null) "Edit Automation Policy" else "New Automation Policy",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
+        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Policy Name") })
-                OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Description") })
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("BATTERY", "WIFI", "SMS", "MANUAL").forEach { type ->
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(380.dp)) {
+                item {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("Policy Name", fontSize = 11.sp) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                item {
+                    OutlinedTextField(
+                        value = description,
+                        onValueChange = { description = it },
+                        label = { Text("Description", fontSize = 11.sp) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                item {
+                    Text("TRIGGER TYPE (44 Options)", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = HighDensityPrimary)
+                    Box {
                         OutlinedButton(
-                            onClick = { triggerType = type },
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                containerColor = if (triggerType == type) HighDensityPrimaryContainer else Color.Transparent
-                            ),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(2.dp),
-                            modifier = Modifier.weight(1f).height(28.dp)
+                            onClick = { showTriggerDropdown = true },
+                            modifier = Modifier.fillMaxWidth().height(36.dp)
                         ) {
-                            Text(type, fontSize = 8.sp)
+                            Text("Trigger: $triggerType", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        DropdownMenu(
+                            expanded = showTriggerDropdown,
+                            onDismissRequest = { showTriggerDropdown = false },
+                            modifier = Modifier.height(240.dp)
+                        ) {
+                            triggers.forEach { t ->
+                                DropdownMenuItem(
+                                    text = { Text("${t.type} (${t.category})", fontSize = 10.sp) },
+                                    onClick = {
+                                        triggerType = t.type
+                                        triggerConfig = getSamplePayloadForTrigger(t.type)
+                                        showTriggerDropdown = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }
-                OutlinedTextField(
-                    value = triggerConfig,
-                    onValueChange = { triggerConfig = it },
-                    label = { Text("Trigger Config JSON") },
-                    textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 10.sp)
-                )
+
+                item {
+                    OutlinedTextField(
+                        value = triggerConfig,
+                        onValueChange = { triggerConfig = it },
+                        label = { Text("Trigger Config JSON", fontSize = 10.sp) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 10.sp),
+                        modifier = Modifier.fillMaxWidth().height(90.dp)
+                    )
+                }
+
+                item {
+                    Text("ADD / SELECT ACTION TYPE (31 Options)", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = HighDensityPrimary)
+                    Box {
+                        OutlinedButton(
+                            onClick = { showActionDropdown = true },
+                            modifier = Modifier.fillMaxWidth().height(36.dp)
+                        ) {
+                            Text("Add Action Type: $selectedActionType", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        DropdownMenu(
+                            expanded = showActionDropdown,
+                            onDismissRequest = { showActionDropdown = false },
+                            modifier = Modifier.height(240.dp)
+                        ) {
+                            actions.forEach { a ->
+                                DropdownMenuItem(
+                                    text = { Text("${a.type} • ${a.description}", fontSize = 10.sp) },
+                                    onClick = {
+                                        selectedActionType = a.type
+                                        actionsJson = getDefaultActionsJsonForAction(a.type)
+                                        showActionDropdown = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    OutlinedTextField(
+                        value = actionsJson,
+                        onValueChange = { actionsJson = it },
+                        label = { Text("Actions Array JSON", fontSize = 10.sp) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 10.sp),
+                        modifier = Modifier.fillMaxWidth().height(100.dp)
+                    )
+                }
             }
         },
         confirmButton = {
@@ -963,12 +1649,12 @@ private fun AddProfileDialog(
                             id = id,
                             name = name,
                             description = description,
-                            isEnabled = true,
+                            isEnabled = existingProfile?.isEnabled ?: true,
                             triggerType = triggerType,
                             triggerConfigJson = triggerConfig,
                             conditionsJson = "{}",
-                            actionsJson = "[\n  {\n    \"type\": \"NOTIFICATION\",\n    \"params\": {\n      \"title\": \"AutoTask Alert\",\n      \"text\": \"Policy $name triggered!\"\n    }\n  }\n]",
-                            createdAt = System.currentTimeMillis(),
+                            actionsJson = actionsJson,
+                            createdAt = existingProfile?.createdAt ?: System.currentTimeMillis(),
                             updatedAt = System.currentTimeMillis()
                         )
                         onSave(newProfile)
@@ -984,18 +1670,36 @@ private fun AddProfileDialog(
     )
 }
 
+private fun getDefaultActionsJsonForAction(actionType: String): String {
+    return when (actionType) {
+        "SPEAK" -> "[\n  {\"type\":\"SPEAK\",\"params\":{\"text\":\"Alert: Policy triggered for {{triggerType}}.\"}}\n]"
+        "TOAST" -> "[\n  {\"type\":\"TOAST\",\"params\":{\"text\":\"AutoTask: Policy triggered\",\"duration\":\"short\"}}\n]"
+        "VIBRATE" -> "[\n  {\"type\":\"VIBRATE\",\"params\":{\"durationMs\":300}}\n]"
+        "AUDIO" -> "[\n  {\"type\":\"AUDIO\",\"params\":{\"ringerMode\":\"silent\",\"stream\":\"ring\",\"volume\":0}}\n]"
+        "DND" -> "[\n  {\"type\":\"DND\",\"params\":{\"enabled\":true,\"policy\":\"priority\"}}\n]"
+        "BRIGHTNESS" -> "[\n  {\"type\":\"BRIGHTNESS\",\"params\":{\"level\":128,\"auto\":false}}\n]"
+        "FLASHLIGHT" -> "[\n  {\"type\":\"FLASHLIGHT\",\"params\":{\"on\":true}}\n]"
+        "HTTP" -> "[\n  {\"type\":\"HTTP\",\"params\":{\"url\":\"http://127.0.0.1:8788/v1/status\",\"method\":\"GET\"}}\n]"
+        "LAUNCH_APP" -> "[\n  {\"type\":\"LAUNCH_APP\",\"params\":{\"packageName\":\"com.android.settings\"}}\n]"
+        "OPEN_URL" -> "[\n  {\"type\":\"OPEN_URL\",\"params\":{\"url\":\"https://ai.studio\"}}\n]"
+        "WRITE_FILE" -> "[\n  {\"type\":\"WRITE_FILE\",\"params\":{\"path\":\"autotask_log.txt\",\"content\":\"Event {{triggerType}} fired at {{timestamp}}\"}}\n]"
+        "LOG" -> "[\n  {\"type\":\"LOG\",\"params\":{\"message\":\"Execution triggered for {{triggerType}}\",\"level\":\"INFO\"}}\n]"
+        else -> "[\n  {\"type\":\"$actionType\",\"params\":{\"title\":\"AutoTask Alert\",\"text\":\"Policy triggered for {{triggerType}}\"}}\n]"
+    }
+}
+
 @Composable
 private fun ProfileJsonDialog(
     profile: AutomationProfile,
     onDismiss: () -> Unit
 ) {
     val jsonStr = remember(profile) {
-        val obj = org.json.JSONObject()
+        val obj = JSONObject()
         obj.put("id", profile.id)
         obj.put("name", profile.name)
         obj.put("triggerType", profile.triggerType)
-        obj.put("triggerConfig", try { org.json.JSONObject(profile.triggerConfigJson) } catch (e: Exception) { profile.triggerConfigJson })
-        obj.put("actions", try { org.json.JSONArray(profile.actionsJson) } catch (e: Exception) { profile.actionsJson })
+        obj.put("triggerConfig", try { JSONObject(profile.triggerConfigJson) } catch (e: Exception) { profile.triggerConfigJson })
+        obj.put("actions", try { JSONArray(profile.actionsJson) } catch (e: Exception) { profile.actionsJson })
         obj.toString(2)
     }
 
