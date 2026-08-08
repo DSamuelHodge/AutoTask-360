@@ -1,0 +1,6 @@
+{
+  "name": "AutoTask",
+  "description": "On-device AI agent tool server for automation policy CRUD & execution",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
