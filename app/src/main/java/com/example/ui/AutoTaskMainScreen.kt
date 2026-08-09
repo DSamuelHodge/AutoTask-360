@@ -1534,7 +1534,8 @@ private fun StatusTab(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                listOf("/v1/status", "/v1/profiles", "/v1/events", "/v1/logs", "/v1/schema").forEach { ep ->
+                listOf("/v1/status", "/v1/profiles", "/v1/events", "/v1/logs", "/v1/schema", "/v1/capabilities").forEach { ep ->
+                    val label = if (ep == "/v1/capabilities") "caps" else ep.removePrefix("/v1/")
                     OutlinedButton(
                         onClick = { selectedEndpoint = ep },
                         colors = ButtonDefaults.outlinedButtonColors(
@@ -1543,7 +1544,7 @@ private fun StatusTab(
                         contentPadding = PaddingValues(2.dp),
                         modifier = Modifier.weight(1f).height(30.dp)
                     ) {
-                        Text(ep.removePrefix("/v1/"), fontSize = 9.sp)
+                        Text(label, fontSize = 9.sp, maxLines = 1)
                     }
                 }
             }

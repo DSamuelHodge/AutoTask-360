@@ -11,6 +11,7 @@ object SchemaProvider {
         root.put("service", "AutoTask Tool Server Engine")
         root.put("version", "2.0.0")
         root.put("architecture", "Policy is Data. Execution is Deterministic.")
+        root.put("capabilitiesEndpoint", "/v1/capabilities")
 
         // Trigger Types
         val triggerTypes = JSONObject()
@@ -105,22 +106,49 @@ object SchemaProvider {
         // Action Types
         val actionTypes = JSONObject()
 
-        fun addAction(type: String, description: String, params: Map<String, String>, notes: String = "") {
+        fun addAction(
+            type: String,
+            description: String,
+            params: Map<String, String>,
+            notes: String = "",
+            requirements: List<String> = emptyList(),
+            risk: String = "low",
+            autonomy: String = "autonomous_allowed"
+        ) {
             val obj = JSONObject()
             obj.put("description", description)
             val pObj = JSONObject()
             params.forEach { (k, v) -> pObj.put(k, v) }
             obj.put("params", pObj)
             if (notes.isNotEmpty()) obj.put("notes", notes)
+            obj.put("requirements", JSONArray(requirements))
+            obj.put("risk", risk)
+            obj.put("autonomy", autonomy)
             actionTypes.put(type, obj)
         }
 
         // Device State
-        addAction("AUDIO", "Changes system ringer mode and volume streams", mapOf("ringerMode" to "String 'normal', 'vibrate', 'silent'", "stream" to "String 'ring', 'media', 'alarm', 'notification'", "volume" to "Int 0-15"))
-        addAction("DND", "Enables or disables Do Not Disturb mode", mapOf("enabled" to "Boolean", "policy" to "String 'all', 'priority', 'none', 'alarms'"), "Requires Do Not Disturb access")
-        addAction("BRIGHTNESS", "Sets screen brightness level", mapOf("level" to "Int 0-255", "auto" to "Boolean"), "Requires WRITE_SETTINGS permission")
-        addAction("SCREEN_TIMEOUT", "Sets screen turn-off timeout in seconds", mapOf("seconds" to "Int timeout in seconds"), "Requires WRITE_SETTINGS permission")
-        addAction("ROTATION", "Toggles auto-rotation or forces orientation", mapOf("auto" to "Boolean", "orientation" to "String 'portrait', 'landscape'"), "Requires WRITE_SETTINGS permission")
+        addAction(
+            "AUDIO",
+            "Changes system ringer mode and volume streams",
+            mapOf("ringerMode" to "String 'normal', 'vibrate', 'silent'", "stream" to "String 'ring', 'media', 'alarm', 'notification'", "volume" to "Int 0-15"),
+            "ringerMode=silent may require Do Not Disturb access on Android 13+",
+            listOf("runtime:notification_policy_access_when_ringerMode_silent"),
+            "medium",
+            "confirm_or_policy_allowed"
+        )
+        addAction(
+            "DND",
+            "Enables or disables Do Not Disturb mode",
+            mapOf("enabled" to "Boolean", "policy" to "String 'all', 'priority', 'none', 'alarms'"),
+            "Requires Do Not Disturb access",
+            listOf("manifest:android.permission.ACCESS_NOTIFICATION_POLICY", "runtime:notification_policy_access"),
+            "elevated",
+            "confirm_or_policy_allowed"
+        )
+        addAction("BRIGHTNESS", "Sets screen brightness level", mapOf("level" to "Int 0-255", "auto" to "Boolean"), "Requires WRITE_SETTINGS permission", listOf("manifest:android.permission.WRITE_SETTINGS", "appop:android:write_settings"), "medium", "policy_allowed")
+        addAction("SCREEN_TIMEOUT", "Sets screen turn-off timeout in seconds", mapOf("seconds" to "Int timeout in seconds"), "Requires WRITE_SETTINGS permission", listOf("manifest:android.permission.WRITE_SETTINGS", "appop:android:write_settings"), "medium", "policy_allowed")
+        addAction("ROTATION", "Toggles auto-rotation or forces orientation", mapOf("auto" to "Boolean", "orientation" to "String 'portrait', 'landscape'"), "Requires WRITE_SETTINGS permission", listOf("manifest:android.permission.WRITE_SETTINGS", "appop:android:write_settings"), "medium", "policy_allowed")
         addAction("POWER_SAVE", "Toggles Power Saver battery mode", mapOf("enabled" to "Boolean"))
 
         // Connectivity
@@ -137,7 +165,7 @@ object SchemaProvider {
         addAction("VIBRATE", "Vibrates device using haptic engine", mapOf("pattern" to "Array<Long> ms timings", "durationMs" to "Long duration"))
 
         // Communication
-        addAction("SEND_SMS", "Sends an outgoing SMS text message", mapOf("number" to "String target phone number", "text" to "String SMS text body"), "Requires SEND_SMS permission")
+        addAction("SEND_SMS", "Sends an outgoing SMS text message", mapOf("number" to "String target phone number", "text" to "String SMS text body"), "Requires SEND_SMS permission", listOf("runtime:android.permission.SEND_SMS"), "high", "confirm_required")
         addAction("CALL", "Initiates outgoing phone dialer call", mapOf("number" to "String phone number"), "Requires CALL_PHONE permission")
         addAction("OPEN_URL", "Opens web URL in default web browser", mapOf("url" to "String web address"))
 
@@ -191,4 +219,3 @@ object SchemaProvider {
         return root.toString(2)
     }
 }
-

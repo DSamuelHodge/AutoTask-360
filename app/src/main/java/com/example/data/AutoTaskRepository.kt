@@ -1,6 +1,7 @@
 package com.example.data
 
 import android.content.Context
+import com.example.engine.CapabilityProvider
 import com.example.server.KtorServerConfig
 import kotlinx.coroutines.flow.Flow
 
@@ -50,6 +51,7 @@ class AutoTaskRepository(context: Context) {
         val profileCount = profileDao.getProfileCount()
         val logCount = logDao.getLogCount()
         val serverConfig = KtorServerConfig.getSnapshot(appContext)
+        val permissionSummary = CapabilityProvider.permissionSummary(appContext)
         return mapOf(
             "engine_running" to 1,
             "profile_count" to profileCount,
@@ -62,6 +64,12 @@ class AutoTaskRepository(context: Context) {
             "listener_port" to serverConfig.listenerPort,
             "last_server_error" to serverConfig.lastError,
             "last_server_result" to serverConfig.lastResult,
+            "notification_policy_declared" to (permissionSummary["notification_policy_declared"] ?: false),
+            "notification_policy_granted" to (permissionSummary["notification_policy_granted"] ?: false),
+            "write_settings_granted" to (permissionSummary["write_settings_granted"] ?: false),
+            "notification_listener_enabled" to (permissionSummary["notification_listener_enabled"] ?: false),
+            "dnd_ready" to (permissionSummary["dnd_ready"] ?: false),
+            "device_settings_ready" to (permissionSummary["device_settings_ready"] ?: false),
             "provider_uri" to "content://com.example.autotask.provider",
             "version" to "1.0.0"
         )

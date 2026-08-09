@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.data.AutomationProfile
 import com.example.engine.AutoTaskEngine
 import com.example.engine.AutomationEvent
+import com.example.engine.CapabilityProvider
 import com.example.engine.SchemaProvider
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -52,6 +53,12 @@ class KtorLoopbackServer(
                     json.put("listener_port", statusMap["listener_port"])
                     json.put("last_server_error", statusMap["last_server_error"])
                     json.put("last_server_result", statusMap["last_server_result"])
+                    json.put("notification_policy_declared", statusMap["notification_policy_declared"])
+                    json.put("notification_policy_granted", statusMap["notification_policy_granted"])
+                    json.put("write_settings_granted", statusMap["write_settings_granted"])
+                    json.put("notification_listener_enabled", statusMap["notification_listener_enabled"])
+                    json.put("dnd_ready", statusMap["dnd_ready"])
+                    json.put("device_settings_ready", statusMap["device_settings_ready"])
                     json.put("provider_uri", "content://com.example.autotask.provider")
                     json.put("uptime_ms", autoTaskEngine.getUptimeMs())
                     json.put("version", "1.0.0")
@@ -62,6 +69,11 @@ class KtorLoopbackServer(
                 // GET /v1/schema
                 get("/v1/schema") {
                     call.respondJson(SchemaProvider.getSchemaJson())
+                }
+
+                // GET /v1/capabilities
+                get("/v1/capabilities") {
+                    call.respondJson(CapabilityProvider.getCapabilitiesJson(context))
                 }
 
                 // GET /v1/profiles

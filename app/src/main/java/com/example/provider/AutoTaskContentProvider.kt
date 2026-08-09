@@ -10,6 +10,7 @@ import com.example.data.AutomationProfile
 import com.example.data.AutoTaskDatabase
 import com.example.engine.AutoTaskEngine
 import com.example.engine.AutomationEvent
+import com.example.engine.CapabilityProvider
 import com.example.server.KtorServerConfig
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
@@ -69,6 +70,12 @@ class AutoTaskContentProvider : ContentProvider() {
                     "listener_port",
                     "last_server_error",
                     "last_server_result",
+                    "notification_policy_declared",
+                    "notification_policy_granted",
+                    "write_settings_granted",
+                    "notification_listener_enabled",
+                    "dnd_ready",
+                    "device_settings_ready",
                     "uptime_ms",
                     "version"
                 ))
@@ -77,6 +84,7 @@ class AutoTaskContentProvider : ContentProvider() {
                     val logCount = db.logDao().getLogCount()
                     val isRunning = if (engine.isRunning) 1 else 0
                     val serverConfig = KtorServerConfig.getSnapshot(requireNotNull(context))
+                    val permissionSummary = CapabilityProvider.permissionSummary(requireNotNull(context))
                     cursor.addRow(arrayOf(
                         isRunning,
                         profileCount,
@@ -89,6 +97,12 @@ class AutoTaskContentProvider : ContentProvider() {
                         serverConfig.listenerPort,
                         serverConfig.lastError,
                         serverConfig.lastResult,
+                        permissionSummary["notification_policy_declared"],
+                        permissionSummary["notification_policy_granted"],
+                        permissionSummary["write_settings_granted"],
+                        permissionSummary["notification_listener_enabled"],
+                        permissionSummary["dnd_ready"],
+                        permissionSummary["device_settings_ready"],
                         engine.getUptimeMs(),
                         "1.0.0"
                     ))

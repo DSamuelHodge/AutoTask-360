@@ -132,10 +132,18 @@ class ActionExecutor(
                 "AUDIO" -> {
                     val modeStr = params.optString("ringerMode", "normal").lowercase()
                     val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                    when (modeStr) {
-                        "silent" -> audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
-                        "vibrate" -> audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE
-                        else -> audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
+                    val targetMode = when (modeStr) {
+                        "silent" -> AudioManager.RINGER_MODE_SILENT
+                        "vibrate" -> AudioManager.RINGER_MODE_VIBRATE
+                        else -> AudioManager.RINGER_MODE_NORMAL
+                    }
+                    if (targetMode == AudioManager.RINGER_MODE_SILENT && !CapabilityProvider.isNotificationPolicyAccessGranted(context)) {
+                        return StepResult(stepIndex, type, "SKIPPED", "Notification policy access missing for AUDIO ringerMode=silent")
+                    }
+                    try {
+                        audioManager.ringerMode = targetMode
+                    } catch (e: SecurityException) {
+                        return StepResult(stepIndex, type, "SKIPPED", "Audio mode change blocked by Android policy: ${e.localizedMessage}")
                     }
                     if (params.has("volume")) {
                         val vol = params.optInt("volume", 7)
@@ -154,13 +162,13 @@ class ActionExecutor(
 
                 "DND" -> {
                     val enabled = params.optBoolean("enabled", true)
-                    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && nm.isNotificationPolicyAccessGranted) {
-                        val filter = if (enabled) NotificationManager.INTERRUPTION_FILTER_PRIORITY else NotificationManager.INTERRUPTION_FILTER_ALL
+                    if (CapabilityProvider.isNotificationPolicyAccessGranted(context)) {
+                        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                        val filter = dndFilterFor(enabled, params.optString("policy", "priority"))
                         nm.setInterruptionFilter(filter)
-                        StepResult(stepIndex, type, "OK", "DND set to $enabled")
+                        StepResult(stepIndex, type, "OK", "DND set to $enabled (${params.optString("policy", "priority")})")
                     } else {
-                        StepResult(stepIndex, type, "SKIPPED", "Notification policy access permission missing for DND")
+                        StepResult(stepIndex, type, "SKIPPED", "Notification policy access missing for DND; grant special access or provision via device-owner/Dhizuku policy")
                     }
                 }
 
@@ -488,6 +496,16 @@ class ActionExecutor(
                 }
             }
         } catch (_: TimeoutCancellationException) {
+        }
+    }
+
+    private fun dndFilterFor(enabled: Boolean, policy: String): Int {
+        if (!enabled) return NotificationManager.INTERRUPTION_FILTER_ALL
+        return when (policy.lowercase()) {
+            "all" -> NotificationManager.INTERRUPTION_FILTER_ALL
+            "none" -> NotificationManager.INTERRUPTION_FILTER_NONE
+            "alarms" -> NotificationManager.INTERRUPTION_FILTER_ALARMS
+            else -> NotificationManager.INTERRUPTION_FILTER_PRIORITY
         }
     }
 
