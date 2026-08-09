@@ -63,7 +63,7 @@ class AutoTaskEngine private constructor(
         val isTargetedManualEvent = event.type == "MANUAL" && !targetProfileId.isNullOrEmpty()
         val targetProfiles = if (isTargetedManualEvent) {
             val prof = repository.getProfileById(targetProfileId)
-            if (prof != null) listOf(prof) else sortedProfiles
+            if (prof != null) listOf(prof) else emptyList()
         } else {
             sortedProfiles
         }

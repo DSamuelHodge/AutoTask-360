@@ -12,6 +12,19 @@ object SchemaProvider {
         root.put("version", "2.0.0")
         root.put("architecture", "Policy is Data. Execution is Deterministic.")
         root.put("capabilitiesEndpoint", "/v1/capabilities")
+        val endpoints = JSONObject()
+        val eventsEndpoint = JSONObject()
+        eventsEndpoint.put("method", "POST")
+        eventsEndpoint.put("path", "/v1/events")
+        eventsEndpoint.put("canonicalBody", JSONObject(mapOf(
+            "triggerType" to "MANUAL",
+            "profileId" to "optional target profile ID; omit only for broadcast",
+            "dryRun" to "Boolean; validates and reports planned profiles without executing actions",
+            "payload" to "JSONObject event payload"
+        )))
+        eventsEndpoint.put("aliasesAccepted", JSONArray(listOf("type", "trigger_type", "profile_id", "dry_run")))
+        endpoints.put("events", eventsEndpoint)
+        root.put("endpoints", endpoints)
 
         // Trigger Types
         val triggerTypes = JSONObject()

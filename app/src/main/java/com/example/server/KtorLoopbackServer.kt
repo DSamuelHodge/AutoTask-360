@@ -59,6 +59,13 @@ class KtorLoopbackServer(
                     json.put("notification_listener_enabled", statusMap["notification_listener_enabled"])
                     json.put("dnd_ready", statusMap["dnd_ready"])
                     json.put("device_settings_ready", statusMap["device_settings_ready"])
+                    val ready = JSONObject()
+                    ready.put("api", autoTaskEngine.isRunning && statusMap["ktor_server_running"] == true)
+                    ready.put("permissions", statusMap["dnd_ready"] == true && statusMap["device_settings_ready"] == true)
+                    ready.put("dnd", statusMap["dnd_ready"])
+                    ready.put("device_settings", statusMap["device_settings_ready"])
+                    ready.put("notification_listener", statusMap["notification_listener_enabled"])
+                    json.put("ready", ready)
                     json.put("provider_uri", "content://com.example.autotask.provider")
                     json.put("uptime_ms", autoTaskEngine.getUptimeMs())
                     json.put("version", "1.0.0")
@@ -204,20 +211,54 @@ class KtorLoopbackServer(
                     val bodyText = call.receiveText()
                     try {
                         val json = if (bodyText.isBlank()) JSONObject() else JSONObject(bodyText)
-                        val triggerType = json.optString("type", "MANUAL").uppercase()
-                        val payloadObj = json.optJSONObject("payload") ?: JSONObject()
+                        val request = EventRequestParser.parse(json)
+                        val triggerType = request.triggerType
 
-                        val payloadMap = mutableMapOf<String, Any?>()
-                        payloadObj.keys().forEach { k ->
-                            payloadMap[k] = payloadObj.get(k)
+                        val targetProfile = if (triggerType == "MANUAL" && request.targetProfileId != null) {
+                            autoTaskEngine.repository.getProfileById(request.targetProfileId)
+                        } else {
+                            null
+                        }
+                        if (triggerType == "MANUAL" && request.targetProfileId != null && targetProfile == null) {
+                            call.respondError(HttpStatusCode.NotFound, "Profile not found: ${request.targetProfileId}")
+                            return@post
                         }
 
-                        val event = AutomationEvent(type = triggerType, payload = payloadMap)
+                        if (request.dryRun) {
+                            val plannedProfiles = if (targetProfile != null) {
+                                listOf(targetProfile)
+                            } else {
+                                autoTaskEngine.repository.profileDao.getEnabledProfilesForTrigger(triggerType)
+                            }
+                            val resp = JSONObject()
+                            resp.put("status", "OK")
+                            resp.put("dryRun", true)
+                            resp.put("triggerType", triggerType)
+                            resp.put("targetProfileId", request.targetProfileId ?: JSONObject.NULL)
+                            resp.put("profilesMatched", plannedProfiles.size)
+                            resp.put("logsGenerated", 0)
+                            val profilesArray = JSONArray()
+                            plannedProfiles.forEach { p ->
+                                val pObj = JSONObject()
+                                pObj.put("id", p.id)
+                                pObj.put("name", p.name)
+                                pObj.put("triggerType", p.triggerType)
+                                pObj.put("isEnabled", p.isEnabled)
+                                profilesArray.put(pObj)
+                            }
+                            resp.put("plannedProfiles", profilesArray)
+                            call.respondJson(resp.toString(2))
+                            return@post
+                        }
+
+                        val event = AutomationEvent(type = triggerType, payload = request.payload)
                         val logs = autoTaskEngine.processEvent(event)
 
                         val resp = JSONObject()
                         resp.put("status", "OK")
+                        resp.put("dryRun", false)
                         resp.put("triggerType", triggerType)
+                        resp.put("targetProfileId", request.targetProfileId ?: JSONObject.NULL)
                         resp.put("logsGenerated", logs.size)
 
                         val logsArray = JSONArray()

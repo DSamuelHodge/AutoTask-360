@@ -440,7 +440,7 @@ object CapabilityProvider {
 
     private fun agentPolicyJson(): JSONObject {
         val policy = JSONObject()
-        policy.put("dryRunSupported", false)
+        policy.put("dryRunSupported", true)
         policy.put("defaultAutonomy", "read_only")
         policy.put("confirmationRequiredFor", JSONArray(listOf("SEND_SMS", "CALL", "DND", "AUDIO:silent")))
         policy.put("safeReadEndpoints", JSONArray(listOf("/v1/status", "/v1/schema", "/v1/capabilities", "/v1/profiles", "/v1/logs")))

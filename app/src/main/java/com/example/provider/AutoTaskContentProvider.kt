@@ -214,10 +214,19 @@ class AutoTaskContentProvider : ContentProvider() {
                 val payloadMap = try {
                     val json = JSONObject(payloadJsonStr)
                     val map = mutableMapOf<String, Any?>()
-                    json.keys().forEach { k -> map[k] = json.get(k) }
+                    json.keys().forEach { k ->
+                        val normalizedKey = if (k == "profile_id") "profileId" else k
+                        map[normalizedKey] = json.get(k)
+                    }
                     map
                 } catch (e: Exception) {
-                    emptyMap<String, Any?>()
+                    mutableMapOf<String, Any?>()
+                }.toMutableMap()
+                val targetProfileId = values.getAsString("profileId")
+                    ?: values.getAsString("profile_id")
+                    ?: payloadMap["profileId"]?.toString()
+                if (!targetProfileId.isNullOrBlank()) {
+                    payloadMap["profileId"] = targetProfileId
                 }
 
                 val event = AutomationEvent(type = triggerType, payload = payloadMap)

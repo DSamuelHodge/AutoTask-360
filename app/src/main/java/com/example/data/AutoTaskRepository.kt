@@ -19,6 +19,7 @@ class AutoTaskRepository(context: Context) {
             val starterProfiles = PolicySeeder.getStarterProfiles()
             profileDao.insertProfiles(starterProfiles)
         }
+        disableUnsafeStarterProfiles()
     }
 
     suspend fun getProfileById(id: String): AutomationProfile? = profileDao.getProfileById(id)
@@ -73,5 +74,14 @@ class AutoTaskRepository(context: Context) {
             "provider_uri" to "content://com.example.autotask.provider",
             "version" to "1.0.0"
         )
+    }
+
+    private suspend fun disableUnsafeStarterProfiles() {
+        listOf("call-direct").forEach { profileId ->
+            val profile = profileDao.getProfileById(profileId)
+            if (profile != null && profile.isEnabled) {
+                profileDao.setProfileEnabled(profileId, false)
+            }
+        }
     }
 }
