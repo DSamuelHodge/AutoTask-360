@@ -138,7 +138,7 @@ object SchemaProvider {
 
         // Communication
         addAction("SEND_SMS", "Sends an outgoing SMS text message", mapOf("number" to "String target phone number", "text" to "String SMS text body"), "Requires SEND_SMS permission")
-        addAction("CALL", "Initiates outgoing phone dialer call", mapOf("number" to "String phone number"), "Requires CALL_PHONE permission")
+        addAction("CALL", "Places an outgoing phone call", mapOf("number" to "String phone number"), "Requires CALL_PHONE permission (runtime grant)")
         addAction("OPEN_URL", "Opens web URL in default web browser", mapOf("url" to "String web address"))
 
         // App Control

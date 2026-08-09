@@ -319,11 +319,11 @@ class ActionExecutor(
                     if (num.isBlank()) {
                         StepResult(stepIndex, type, "FAILED", "Call phone number is required")
                     } else {
-                        val callIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$num")).apply {
+                        val callIntent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$num")).apply {
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
                         context.startActivity(callIntent)
-                        StepResult(stepIndex, type, "OK", "Dialer opened for $num")
+                        StepResult(stepIndex, type, "OK", "Calling $num")
                     }
                 }
 
