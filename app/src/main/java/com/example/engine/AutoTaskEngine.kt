@@ -61,6 +61,7 @@ class AutoTaskEngine private constructor(
         // Handle MANUAL trigger if fired directly with a specific profileId in payload
         val targetProfileId = event.payload["profileId"]?.toString()
         val isTargetedManualEvent = event.type == "MANUAL" && !targetProfileId.isNullOrEmpty()
+        val dryRun = event.payload["dryRun"]?.toString()?.toBooleanStrictOrNull() ?: false
         val targetProfiles = if (isTargetedManualEvent) {
             val prof = repository.getProfileById(targetProfileId)
             if (prof != null) listOf(prof) else emptyList()
@@ -98,7 +99,7 @@ class AutoTaskEngine private constructor(
 
             // Execute Actions
             val startTime = System.currentTimeMillis()
-            val (status, stepResults) = executor.executeActions(profile, event)
+            val (status, stepResults) = executor.executeActions(profile, event, dryRun)
             val duration = System.currentTimeMillis() - startTime
 
             // Format step results JSON

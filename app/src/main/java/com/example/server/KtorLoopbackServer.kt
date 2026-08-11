@@ -251,7 +251,10 @@ class KtorLoopbackServer(
                             return@post
                         }
 
-                        val event = AutomationEvent(type = triggerType, payload = request.payload)
+                        val eventPayload = request.payload.toMutableMap().apply {
+                            if (request.dryRun) put("dryRun", true)
+                        }
+                        val event = AutomationEvent(type = triggerType, payload = eventPayload)
                         val logs = autoTaskEngine.processEvent(event)
 
                         val resp = JSONObject()
