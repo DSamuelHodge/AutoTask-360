@@ -1,0 +1,90 @@
+name: Implementation Issue (PR-ready)
+description: Use this template to file a well-scoped, PR-ready implementation task with explicit safety, permission, and privacy sections.
+title: "[impl] "
+labels: ["implementation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Fill this out before starting work. A PR is only "PR-ready" when the
+        acceptance criteria and verification plan below are concrete and testable.
+  - type: input
+    id: outcome
+    attributes:
+      label: Outcome
+      description: One sentence — what ships when this is done.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Why this is needed, what problem it solves, and any links to issues/designs.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Files/components/behaviors this change touches.
+    validations:
+      required: true
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out-of-scope
+      description: Explicitly what is NOT included (so reviewers don't expand scope).
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Checklist of concrete, verifiable conditions. A reviewer must be able to confirm each.
+      placeholder: |
+        - [ ] Unit test X passes
+        - [ ] Manifest declares Y
+        - [ ] No secrets logged
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification plan
+      description: Exact commands/steps to verify (e.g. ./gradlew test, manual ADB steps). CI is the source of truth.
+    validations:
+      required: true
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk level
+      options:
+        - low
+        - medium
+        - high
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety / privacy / permission notes
+      description: |
+        REQUIRED. Address each that applies:
+        - Android permissions added/changed (runtime vs special)
+        - Exported components (Activity/Service/Receiver/Provider) and their protection
+        - IPC surface (ContentProvider, bound services, loopback server) and auth
+        - Network exposure (endpoints, local-only vs remote, token/auth)
+        - Backup behavior (allowBackup, data in cloud/device-transfer backups)
+        - Tokens / secrets (where stored, never logged, invalidation)
+        - Sensitive data (logs, webhook URLs, headers, SMS templates, phone numbers)
+    validations:
+      required: true
+  - type: textarea
+    id: reviewer
+    attributes:
+      label: Reviewer checklist
+      description: What the reviewer should specifically check.
+      placeholder: |
+        - [ ] No hardcoded secrets
+        - [ ] Permissions minimized
+        - [ ] Endpoints don't leak tokens

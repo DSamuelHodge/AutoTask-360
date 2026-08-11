@@ -13,6 +13,10 @@ android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
+  // versionCode / versionName ownership:
+  // - Bump versionCode on every publishable release (monotonic, required by Play).
+  // - versionName is human-facing; both are owned by the release process and must
+  //   never be auto-decremented. See docs/RELEASE_SIGNING.md.
   defaultConfig {
     applicationId = "com.aistudio.autotask.svcqx"
     minSdk = 24
@@ -23,13 +27,20 @@ android {
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
+  // Release signing reads exclusively from CI-provided secrets / local env vars.
+  // Nothing secret is hardcoded here. When the env vars are absent, the build
+  // falls back to a local keystore path (still expected to be git-ignored and
+  // never committed). See docs/RELEASE_SIGNING.md.
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
+      val keystorePath =
+        System.getenv("KEYSTORE_PATH")
+          ?: findProperty("KEYSTORE_PATH") as String?
+          ?: "${rootDir}/my-upload-key.jks"
       storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      storePassword = System.getenv("STORE_PASSWORD") ?: findProperty("STORE_PASSWORD") as String?
+      keyAlias = System.getenv("KEY_ALIAS") ?: findProperty("KEY_ALIAS") as String? ?: "upload"
+      keyPassword = System.getenv("KEY_PASSWORD") ?: findProperty("KEY_PASSWORD") as String?
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
