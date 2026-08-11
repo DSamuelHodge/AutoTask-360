@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Debug bring-up override: relax agent provider ACL to signature so local
+         curl/debug tooling signed with the debug key can read/write the provider.
+         Release uses the main manifest (signatureOrSystem). -->
+    <permission
+        android:name="com.example.autotask.permission.AGENT_READ"
+        android:protectionLevel="signature" />
+    <permission
+        android:name="com.example.autotask.permission.AGENT_WRITE"
+        android:protectionLevel="signature" />
+
+</manifest>

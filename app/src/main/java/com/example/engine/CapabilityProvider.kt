@@ -17,6 +17,11 @@ import org.json.JSONObject
 object CapabilityProvider {
     private const val NOTIFICATION_POLICY_ACCESS = "android.permission.ACCESS_NOTIFICATION_POLICY"
 
+    // Injectable grant-state override. Null = use the real platform check.
+    // Used by hermetic tests to simulate the DND/Notification Policy Access grant path.
+    @Volatile
+    var notificationPolicyAccessOverride: Boolean? = null
+
     fun getCapabilitiesJson(context: Context): String {
         val root = JSONObject()
         root.put("service", "AutoTask Tool Server Engine")
@@ -79,6 +84,7 @@ object CapabilityProvider {
     }
 
     fun isNotificationPolicyAccessGranted(context: Context): Boolean {
+        notificationPolicyAccessOverride?.let { return it }
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.isNotificationPolicyAccessGranted

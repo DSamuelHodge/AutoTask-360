@@ -1,21 +1,56 @@
 # Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# ---------------------------------------------------------------------------
+# Room (#12): keep entities, DAOs, and the Room database implementation.
+# Room generates member accessors at compile time; R8 must not strip them.
+# ---------------------------------------------------------------------------
+-keep class androidx.room.** { *; }
+-keep @androidx.room.Entity class * { *; }
+-keep interface androidx.room.Dao { *; }
+-keep interface com.example.data.*Dao { *; }
+-keep class com.example.data.AutomationProfile { *; }
+-keep class com.example.data.ExecutionLog { *; }
+-keep abstract class com.example.data.AutoTaskDatabase { *; }
+-keep class com.example.data.AutoTaskDatabase_Impl { *; }
+-keep class com.example.data.AutoTaskRepository { *; }
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# ---------------------------------------------------------------------------
+# Engine (#12): preserve action/execution classes, event model, capabilities.
+# These are reached reflectively via JSON action dispatch and the provider.
+# ---------------------------------------------------------------------------
+-keep class com.example.engine.ActionExecutor { *; }
+-keep class com.example.engine.AutoTaskEngine { *; }
+-keep class com.example.engine.CapabilityProvider { *; }
+-keep class com.example.engine.SchemaProvider { *; }
+-keep class com.example.engine.AutomationEvent { *; }
+-keep class com.example.engine.StepResult { *; }
+-keep class com.example.provider.AutoTaskContentProvider { *; }
+-keep class com.example.provider.AutoTaskContentProvider$** { *; }
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# ---------------------------------------------------------------------------
+# JSON / model serialization (#12): keep kotlinx + moshi model classes.
+# ---------------------------------------------------------------------------
+-keepattributes Signature
+-keepattributes *Annotation*
+-keep class kotlinx.serialization.** { *; }
+-keep class com.squareup.moshi.** { *; }
+-keep class * extends com.squareup.moshi.JsonAdapter { *; }
+-keepclassmembers class * {
+    @com.squareup.moshi.FromJson <methods>;
+    @com.squareup.moshi.ToJson <methods>;
+}
+
+# Keep all app data/engine/model value classes to avoid JSON field stripping
+-keep class com.example.data.** { *; }
+-keep class com.example.engine.** { *; }
+-keep class com.example.server.** { *; }
+
+# Enums used in dispatch / status must survive obfuscation
+-keepclassmembers enum * {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}
+
+# Preserve line numbers for crash diagnostics in release builds
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile

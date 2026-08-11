@@ -42,9 +42,13 @@ android {
   buildTypes {
     release {
       isCrunchPngs = false
-      isMinifyEnabled = false
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
+      // Release hardening gate (#13 #15): fail the build if debug-only components or
+      // unprotected exported surfaces leak into the merged release manifest.
+      checkReleaseManifest()
     }
     debug { signingConfig = signingConfigs.getByName("debugConfig") }
   }
@@ -60,6 +64,35 @@ android {
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true
+  }
+}
+
+// Release hardening gate (#13 #15): parse the merged release manifest and fail if
+// the ContentProvider lacks read/write permissions or any debug-only surface is exported.
+fun checkReleaseManifest() {
+  afterEvaluate {
+    val mergeTask = tasks.findByName("processReleaseManifest") ?: return@afterEvaluate
+    tasks.register("checkReleaseManifest") {
+      dependsOn(mergeTask)
+      doLast {
+        val manifest = file("${layout.buildDirectory.get()}/intermediates/merged_manifest/release/AndroidManifest.xml")
+        if (!manifest.exists()) {
+          logger.warn("Release manifest not found at $manifest; skipping gate (ensure processReleaseManifest ran).")
+          return@doLast
+        }
+        val text = manifest.readText()
+        val providerPermIssue = !text.contains("android:readPermission=\"com.example.autotask.permission.AGENT_READ\"") ||
+          !text.contains("android:writePermission=\"com.example.autotask.permission.AGENT_WRITE\"")
+        check(!providerPermIssue) {
+          "Release hardening gate FAILED: AutoTaskContentProvider must declare AGENT_READ/AGENT_WRITE permissions in the merged release manifest."
+        }
+        val debugLeak = text.contains("com.example.autotask.DEBUG") || text.contains("android:debuggable=\"true\"")
+        check(!debugLeak) {
+          "Release hardening gate FAILED: debug-only component or debuggable=true detected in release manifest."
+        }
+        logger.lifecycle("Release hardening gate PASSED: provider ACL present, no debug leakage.")
+      }
+    }
   }
 }
 

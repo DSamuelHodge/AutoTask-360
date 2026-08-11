@@ -82,7 +82,8 @@ class ActionExecutor(
 
     suspend fun executeActions(
         profile: AutomationProfile,
-        event: AutomationEvent
+        event: AutomationEvent,
+        dryRun: Boolean = false
     ): Pair<String, List<StepResult>> = withContext(Dispatchers.IO) {
         val results = mutableListOf<StepResult>()
 
@@ -97,7 +98,11 @@ class ActionExecutor(
                 val type = actionObj.optString("type", "").uppercase()
                 val paramsObj = actionObj.optJSONObject("params") ?: JSONObject()
 
-                val stepRes = runSingleAction(i, type, paramsObj, profile, event)
+                val stepRes = if (dryRun) {
+                    dryRunStep(i, type)
+                } else {
+                    runSingleAction(i, type, paramsObj, profile, event)
+                }
                 results.add(stepRes)
             }
         } catch (e: Exception) {
@@ -105,7 +110,16 @@ class ActionExecutor(
             return@withContext Pair("FAILED", results)
         }
 
-        Pair(finalStatusFor(results), results)
+        val finalStatus = if (dryRun) "DRY_RUN" else finalStatusFor(results)
+        Pair(finalStatus, results)
+    }
+
+    /**
+     * Dry-run: validate routing/matching without performing any side effect.
+     * Returns a [StepResult] describing what *would* have executed.
+     */
+    private fun dryRunStep(stepIndex: Int, type: String): StepResult {
+        return StepResult(stepIndex, type, "DRY_RUN", "would execute $type")
     }
 
     private suspend fun runSingleAction(
@@ -115,6 +129,17 @@ class ActionExecutor(
         profile: AutomationProfile,
         event: AutomationEvent
     ): StepResult {
+        // High-risk action guard (Kaneo #29): CALL / SEND_SMS require agent writes
+        // to be enabled. When locked, skip without performing the side effect.
+        if ((type == "CALL" || type == "SEND_SMS") && !ExecutionPolicy.isHighRiskAllowed()) {
+            return StepResult(
+                stepIndex,
+                type,
+                "SKIPPED",
+                "blocked: high-risk action requires confirmation/agent-write enabled"
+            )
+        }
+
         return try {
             when (type) {
                 "NOTIFICATION" -> {
@@ -138,7 +163,7 @@ class ActionExecutor(
                         else -> AudioManager.RINGER_MODE_NORMAL
                     }
                     if (targetMode == AudioManager.RINGER_MODE_SILENT && !CapabilityProvider.isNotificationPolicyAccessGranted(context)) {
-                        return StepResult(stepIndex, type, "SKIPPED", "Notification policy access missing for AUDIO ringerMode=silent")
+                        return StepResult(stepIndex, type, "SKIPPED", "Notification Policy Access not granted for AUDIO ringerMode=silent. Fix: open Settings > Notifications > Do Not Disturb access (or run: adb shell cmd notification allow_dnd ${context.packageName} 0) and grant AutoTask access, then retry.")
                     }
                     try {
                         audioManager.ringerMode = targetMode
@@ -168,7 +193,7 @@ class ActionExecutor(
                         nm.setInterruptionFilter(filter)
                         StepResult(stepIndex, type, "OK", "DND set to $enabled (${params.optString("policy", "priority")})")
                     } else {
-                        StepResult(stepIndex, type, "SKIPPED", "Notification policy access missing for DND; grant special access or provision via device-owner/Dhizuku policy")
+                        StepResult(stepIndex, type, "SKIPPED", "Notification Policy Access not granted for DND. Fix: open Settings > Notifications > Do Not Disturb access (or run: adb shell cmd notification allow_dnd ${context.packageName} 0) and grant AutoTask access, then retry. DND will not be enforced until this special access is granted (Android 13+ requires the user/system-owner grant path).")
                     }
                 }
 

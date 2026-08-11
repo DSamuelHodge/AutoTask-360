@@ -46,6 +46,15 @@
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
 
+    <!-- Agent provider ACL. signatureOrSystem in release hardens cross-app access;
+         debug source set overrides to signature so local development/curl work. -->
+    <permission
+        android:name="com.example.autotask.permission.AGENT_READ"
+        android:protectionLevel="signatureOrSystem" />
+    <permission
+        android:name="com.example.autotask.permission.AGENT_WRITE"
+        android:protectionLevel="signatureOrSystem" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -102,7 +111,9 @@
         <provider
             android:name=".provider.AutoTaskContentProvider"
             android:authorities="com.example.autotask.provider"
-            android:exported="true" />
+            android:exported="true"
+            android:readPermission="com.example.autotask.permission.AGENT_READ"
+            android:writePermission="com.example.autotask.permission.AGENT_WRITE" />
 
     </application>
 
