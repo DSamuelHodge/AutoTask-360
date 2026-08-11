@@ -2,8 +2,11 @@ package com.example.data
 
 import android.content.Context
 import com.example.engine.CapabilityProvider
+import com.example.engine.ExecutionPolicy
+import com.example.engine.ExecutionPolicy.AgentWriteDisabledException
 import com.example.server.KtorServerConfig
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.runBlocking
 
 class AutoTaskRepository(context: Context) {
     private val appContext = context.applicationContext
@@ -48,6 +51,83 @@ class AutoTaskRepository(context: Context) {
         return logDao.insertLog(log)
     }
 
+    /**
+     * Provenance-aware upsert (#19). [callerIdentity] identifies the writer (e.g. "agent:<client>").
+     * When written via the agent surface, records createdBy/modifiedBy/sourceSurface and an audit log.
+     * Rejects the write when the agent-write kill switch is disabled (#21).
+     */
+    suspend fun upsertProfileWithProvenance(
+        profile: AutomationProfile,
+        callerIdentity: String = "local",
+        sourceSurface: String = "local",
+        reason: String? = null
+    ) {
+        val isAgent = callerIdentity.startsWith("agent:") || sourceSurface == "agent"
+        if (isAgent && !ExecutionPolicy.isAgentWriteAllowed()) {
+            throw AgentWriteDisabledException()
+        }
+        val now = System.currentTimeMillis()
+        val existing = profileDao.getProfileById(profile.id)
+        val updated = if (existing == null) {
+            profile.copy(
+                createdBy = callerIdentity,
+                modifiedBy = callerIdentity,
+                sourceSurface = sourceSurface,
+                reason = reason,
+                createdAt = profile.createdAt,
+                updatedAt = now
+            )
+        } else {
+            profile.copy(
+                createdBy = existing.createdBy,
+                modifiedBy = callerIdentity,
+                sourceSurface = sourceSurface,
+                reason = reason ?: existing.reason,
+                createdAt = existing.createdAt,
+                updatedAt = now
+            )
+        }
+        profileDao.upsertProfile(updated)
+        if (isAgent) {
+            insertAuditLog(profile.id, profile.name, "upsert", callerIdentity, reason)
+        }
+    }
+
+    /**
+     * Audit marker log for agent-authored policy changes (#19). Uses the execution_logs table;
+     * [skippedReason] carries the audit marker so it is visible via the local/API log surface.
+     */
+    private suspend fun insertAuditLog(
+        profileId: String,
+        profileName: String,
+        action: String,
+        actor: String,
+        reason: String?
+    ) {
+        logDao.insertLog(
+            ExecutionLog(
+                profileId = profileId,
+                profileName = profileName,
+                triggerType = "AGENT_POLICY",
+                status = "AUDIT",
+                skippedReason = "action=$action;actor=$actor;reason=${reason ?: "null"}",
+                actionsResultJson = "[]",
+                durationMs = 0L
+            )
+        )
+    }
+
+    /** Public wrapper so the content provider (runBlocking) can record agent audit entries. */
+    fun insertAgentAudit(
+        profileId: String,
+        profileName: String,
+        action: String,
+        actor: String,
+        reason: String?
+    ) {
+        runBlocking { insertAuditLog(profileId, profileName, action, actor, reason) }
+    }
+
     suspend fun getStatusMap(): Map<String, Any> {
         val profileCount = profileDao.getProfileCount()
         val logCount = logDao.getLogCount()
@@ -72,6 +152,8 @@ class AutoTaskRepository(context: Context) {
             "dnd_ready" to (permissionSummary["dnd_ready"] ?: false),
             "device_settings_ready" to (permissionSummary["device_settings_ready"] ?: false),
             "provider_uri" to "content://com.example.autotask.provider",
+            "execution_enabled" to ExecutionPolicy.isExecutionAllowed(),
+            "agent_writes_enabled" to ExecutionPolicy.isAgentWriteAllowed(),
             "version" to "1.0.0"
         )
     }

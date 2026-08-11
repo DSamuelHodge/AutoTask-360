@@ -5,6 +5,8 @@ import com.example.data.AutomationProfile
 import com.example.engine.AutoTaskEngine
 import com.example.engine.AutomationEvent
 import com.example.engine.CapabilityProvider
+import com.example.engine.ExecutionPolicy
+import com.example.engine.ExecutionPolicy.AgentWriteDisabledException
 import com.example.engine.SchemaProvider
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -69,6 +71,8 @@ class KtorLoopbackServer(
                     json.put("provider_uri", "content://com.example.autotask.provider")
                     json.put("uptime_ms", autoTaskEngine.getUptimeMs())
                     json.put("version", "1.0.0")
+                    json.put("execution_enabled", ExecutionPolicy.isExecutionAllowed())
+                    json.put("agent_writes_enabled", ExecutionPolicy.isAgentWriteAllowed())
 
                     call.respondJson(json.toString(2))
                 }
@@ -143,13 +147,20 @@ class KtorLoopbackServer(
                             updatedAt = now
                         )
 
-                        autoTaskEngine.repository.upsertProfile(profile)
+                        autoTaskEngine.repository.upsertProfileWithProvenance(
+                            profile = profile,
+                            callerIdentity = "agent:ktor",
+                            sourceSurface = "agent",
+                            reason = if (json.has("reason")) json.getString("reason") else null
+                        )
 
                         val resp = JSONObject()
                         resp.put("status", "OK")
                         resp.put("message", "Profile upserted successfully")
                         resp.put("profile", profileToJson(profile))
                         call.respondJson(resp.toString(2), HttpStatusCode.Created)
+                    } catch (e: AgentWriteDisabledException) {
+                        call.respondError(HttpStatusCode.Forbidden, e.message ?: "Agent writes disabled")
                     } catch (e: Exception) {
                         call.respondError(HttpStatusCode.BadRequest, "Invalid JSON body: ${e.localizedMessage}")
                     }
@@ -180,13 +191,20 @@ class KtorLoopbackServer(
                             updatedAt = System.currentTimeMillis()
                         )
 
-                        autoTaskEngine.repository.updateProfile(updated)
+                        autoTaskEngine.repository.upsertProfileWithProvenance(
+                            profile = updated,
+                            callerIdentity = "agent:ktor",
+                            sourceSurface = "agent",
+                            reason = if (json.has("reason")) json.optString("reason", null) else existing.reason
+                        )
 
                         val resp = JSONObject()
                         resp.put("status", "OK")
                         resp.put("message", "Profile patched")
                         resp.put("profile", profileToJson(updated))
                         call.respondJson(resp.toString(2))
+                    } catch (e: AgentWriteDisabledException) {
+                        call.respondError(HttpStatusCode.Forbidden, e.message ?: "Agent writes disabled")
                     } catch (e: Exception) {
                         call.respondError(HttpStatusCode.BadRequest, "Invalid JSON patch: ${e.localizedMessage}")
                     }
@@ -335,6 +353,10 @@ class KtorLoopbackServer(
         obj.put("createdAt", p.createdAt)
         obj.put("updatedAt", p.updatedAt)
         obj.put("lastTriggeredAt", p.lastTriggeredAt)
+        obj.put("createdBy", p.createdBy)
+        obj.put("modifiedBy", p.modifiedBy)
+        obj.put("sourceSurface", p.sourceSurface)
+        obj.put("reason", p.reason ?: JSONObject.NULL)
         return obj
     }
 

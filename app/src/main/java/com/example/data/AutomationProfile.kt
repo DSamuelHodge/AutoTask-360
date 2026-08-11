@@ -17,5 +17,11 @@ data class AutomationProfile(
     val priority: Int = 0,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
-    val lastTriggeredAt: Long = 0L
+    val lastTriggeredAt: Long = 0L,
+    // --- Local trust contract provenance (#19) ---
+    // Tracks origin of agent-authored policy changes. Defaults to "local" for non-agent writes.
+    val createdBy: String = "local",
+    val modifiedBy: String = "local",
+    val sourceSurface: String = "local",
+    val reason: String? = null
 )

@@ -20,6 +20,8 @@ import androidx.core.app.NotificationCompat
 import com.example.data.AutomationProfile
 import com.example.data.AutoTaskRepository
 import com.example.data.ExecutionLog
+import com.example.engine.ActionRisk
+import com.example.engine.ExecutionPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
@@ -116,6 +118,17 @@ class ActionExecutor(
         event: AutomationEvent
     ): StepResult {
         return try {
+            // Trust-contract gate (#20/#21): high-risk actions require both execution and
+            // agent-write switches to be enabled. When blocked, skip with an auditable reason
+            // rather than failing loudly, so the engine keeps processing other steps.
+            if (ActionRisk.isHighRisk(type, params.toParamMap())) {
+                if (!ExecutionPolicy.isHighRiskAllowed()) {
+                    return StepResult(stepIndex, type, "SKIPPED", "High-risk action blocked by trust contract (executionEnabled=${ExecutionPolicy.isExecutionAllowed()}, agentWritesEnabled=${ExecutionPolicy.isAgentWriteAllowed()})")
+                }
+                if (ActionRisk.requiresConfirmation(type, params.toParamMap())) {
+                    return StepResult(stepIndex, type, "SKIPPED", "Confirmation required for $type (no allowlist/confirmation supplied)")
+                }
+            }
             when (type) {
                 "NOTIFICATION" -> {
                     val rawTitle = params.optString("title", "AutoTask Alert")

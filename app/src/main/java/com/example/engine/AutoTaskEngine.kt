@@ -3,6 +3,7 @@ package com.example.engine
 import android.content.Context
 import com.example.data.AutoTaskRepository
 import com.example.data.ExecutionLog
+import com.example.engine.ExecutionPolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -44,7 +45,7 @@ class AutoTaskEngine private constructor(
     }
 
     suspend fun processEvent(event: AutomationEvent): List<ExecutionLog> = mutex.withLock {
-        if (!isRunning) return emptyList()
+        if (!isRunning || !ExecutionPolicy.isExecutionAllowed()) return emptyList()
 
         val enabledProfiles = repository.profileDao.getEnabledProfilesForTrigger(event.type)
         val now = System.currentTimeMillis()
@@ -157,7 +158,7 @@ class AutoTaskEngine private constructor(
     }
 
     fun setRunningState(running: Boolean) {
-        isRunning = running
+        isRunning = running && ExecutionPolicy.isExecutionAllowed()
     }
 
     fun getUptimeMs(): Long {

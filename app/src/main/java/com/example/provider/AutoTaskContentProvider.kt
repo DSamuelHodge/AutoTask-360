@@ -77,7 +77,9 @@ class AutoTaskContentProvider : ContentProvider() {
                     "dnd_ready",
                     "device_settings_ready",
                     "uptime_ms",
-                    "version"
+                    "version",
+                    "execution_enabled",
+                    "agent_writes_enabled"
                 ))
                 runBlocking {
                     val profileCount = db.profileDao().getProfileCount()
@@ -104,7 +106,9 @@ class AutoTaskContentProvider : ContentProvider() {
                         permissionSummary["dnd_ready"],
                         permissionSummary["device_settings_ready"],
                         engine.getUptimeMs(),
-                        "1.0.0"
+                        "1.0.0",
+                        ExecutionPolicy.isExecutionAllowed(),
+                        ExecutionPolicy.isAgentWriteAllowed()
                     ))
                 }
                 cursor
@@ -114,7 +118,8 @@ class AutoTaskContentProvider : ContentProvider() {
                 val cursor = MatrixCursor(arrayOf(
                     "id", "name", "description", "isEnabled", "triggerType",
                     "triggerConfigJson", "conditionsJson", "actionsJson",
-                    "cooldownMs", "priority", "createdAt", "updatedAt", "lastTriggeredAt"
+                    "cooldownMs", "priority", "createdAt", "updatedAt", "lastTriggeredAt",
+                    "createdBy", "modifiedBy", "sourceSurface", "reason"
                 ))
                 runBlocking {
                     val profiles = db.profileDao().getAllProfiles()
@@ -122,7 +127,8 @@ class AutoTaskContentProvider : ContentProvider() {
                         cursor.addRow(arrayOf(
                             p.id, p.name, p.description, if (p.isEnabled) 1 else 0, p.triggerType,
                             p.triggerConfigJson, p.conditionsJson, p.actionsJson,
-                            p.cooldownMs, p.priority, p.createdAt, p.updatedAt, p.lastTriggeredAt
+                            p.cooldownMs, p.priority, p.createdAt, p.updatedAt, p.lastTriggeredAt,
+                            p.createdBy, p.modifiedBy, p.sourceSurface, p.reason
                         ))
                     }
                 }
@@ -134,7 +140,8 @@ class AutoTaskContentProvider : ContentProvider() {
                 val cursor = MatrixCursor(arrayOf(
                     "id", "name", "description", "isEnabled", "triggerType",
                     "triggerConfigJson", "conditionsJson", "actionsJson",
-                    "cooldownMs", "priority", "createdAt", "updatedAt", "lastTriggeredAt"
+                    "cooldownMs", "priority", "createdAt", "updatedAt", "lastTriggeredAt",
+                    "createdBy", "modifiedBy", "sourceSurface", "reason"
                 ))
                 runBlocking {
                     val p = db.profileDao().getProfileById(id)
@@ -142,7 +149,8 @@ class AutoTaskContentProvider : ContentProvider() {
                         cursor.addRow(arrayOf(
                             p.id, p.name, p.description, if (p.isEnabled) 1 else 0, p.triggerType,
                             p.triggerConfigJson, p.conditionsJson, p.actionsJson,
-                            p.cooldownMs, p.priority, p.createdAt, p.updatedAt, p.lastTriggeredAt
+                            p.cooldownMs, p.priority, p.createdAt, p.updatedAt, p.lastTriggeredAt,
+                            p.createdBy, p.modifiedBy, p.sourceSurface, p.reason
                         ))
                     }
                 }
@@ -188,6 +196,8 @@ class AutoTaskContentProvider : ContentProvider() {
             CODE_PROFILES -> {
                 val id = values.getAsString("id") ?: "profile_${System.currentTimeMillis()}"
                 val now = System.currentTimeMillis()
+                val caller = values.getAsString("callerIdentity") ?: "local"
+                val reason = values.getAsString("reason")
                 val profile = AutomationProfile(
                     id = id,
                     name = values.getAsString("name") ?: "New Automation Profile",
@@ -203,7 +213,16 @@ class AutoTaskContentProvider : ContentProvider() {
                     updatedAt = now
                 )
                 runBlocking {
-                    db.profileDao().upsertProfile(profile)
+                    try {
+                        engine.repository.upsertProfileWithProvenance(
+                            profile = profile,
+                            callerIdentity = caller,
+                            sourceSurface = "agent",
+                            reason = reason
+                        )
+                    } catch (e: AgentWriteDisabledException) {
+                        return@runBlocking
+                    }
                 }
                 Uri.withAppendedPath(CONTENT_URI_PROFILES, id)
             }
