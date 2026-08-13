@@ -310,6 +310,38 @@ class KtorLoopbackServer(
                     resp.put("message", "Execution logs cleared")
                     call.respondJson(resp.toString(2))
                 }
+
+                // GET /v1/wa/status — WhatsApp Web bridge state.
+                get("/v1/wa/status") {
+                    val resp = JSONObject()
+                    resp.put("bridge_running", com.example.wa.WhatsAppBridgeManager.webView != null)
+                    resp.put("paired", com.example.wa.WhatsAppBridgeManager.isPaired)
+                    resp.put("last_error", com.example.wa.WhatsAppBridgeManager.lastError ?: JSONObject.NULL)
+                    resp.put("last_send_result", com.example.wa.WhatsAppBridgeManager.lastSendResult ?: JSONObject.NULL)
+                    call.respondJson(resp.toString(2))
+                }
+
+                // POST /v1/wa/send — send a WhatsApp message via the bridge.
+                post("/v1/wa/send") {
+                    val bodyText = call.receiveText()
+                    try {
+                        val json = JSONObject(bodyText)
+                        val phone = json.optString("phone", "")
+                        val text = json.optString("text", "")
+                        if (phone.isBlank() || text.isBlank()) {
+                            call.respondError(HttpStatusCode.BadRequest, "phone and text are required")
+                            return@post
+                        }
+                        val ok = com.example.wa.WhatsAppBridgeManager.sendMessage(phone, text)
+                        val resp = JSONObject()
+                        resp.put("status", if (ok) "OK" else "NOT_READY")
+                        resp.put("paired", com.example.wa.WhatsAppBridgeManager.isPaired)
+                        resp.put("message", if (ok) "send dispatched" else "bridge not paired")
+                        call.respondJson(resp.toString(2))
+                    } catch (e: Exception) {
+                        call.respondError(HttpStatusCode.BadRequest, "Invalid JSON body: ${e.localizedMessage}")
+                    }
+                }
             }
         }
         serverEngine?.start(wait = false)

@@ -89,6 +89,22 @@
             </intent-filter>
         </service>
 
+        <!-- WhatsApp Web Bridge Activity (QR pairing) -->
+        <activity
+            android:name=".wa.WhatsAppBridgeActivity"
+            android:exported="true"
+            android:label="CoS WhatsApp Bridge" />
+
+        <!-- WhatsApp Web Bridge foreground service -->
+        <service
+            android:name=".wa.WhatsAppBridgeService"
+            android:exported="true"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="On-device WhatsApp Web bridge for the CoS agent" />
+        </service>
+
         <!-- Boot Receiver -->
         <receiver
             android:name=".service.BootReceiver"
