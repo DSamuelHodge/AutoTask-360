@@ -12,6 +12,7 @@ import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
 import io.ktor.server.cio.CIO
 import io.ktor.server.cio.CIOApplicationEngine
+import okhttp3.MediaType.Companion.toMediaType
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.request.receiveText
@@ -334,6 +335,49 @@ class KtorLoopbackServer(
                         val resp = JSONObject()
                         resp.put("ok", false)
                         resp.put("error", "brain unreachable: ${e.message}")
+                        call.respondJson(resp.toString(2))
+                    }
+                }
+
+                // POST /v1/http — outbound HTTP proxy for the brain (it has no
+                // network stack/curl; the engine's OkHttp does TLS).
+                post("/v1/http") {
+                    val bodyText = call.receiveText()
+                    try {
+                        val req = JSONObject(bodyText)
+                        val url = req.optString("url", "")
+                        val method = req.optString("method", "GET").uppercase()
+                        val headers = req.optJSONObject("headers") ?: JSONObject()
+                        if (url.isBlank()) {
+                            call.respondError(HttpStatusCode.BadRequest, "url is required")
+                            return@post
+                        }
+                        val bodyData = if (req.has("data")) req.get("data").toString() else null
+                        val builder = okhttp3.Request.Builder().url(url)
+                        for (k in headers.keys()) builder.header(k, headers.getString(k))
+                        val jsonType = "application/json; charset=utf-8".toMediaType()
+                        val httpBody = when {
+                            bodyData != null -> okhttp3.RequestBody.create(jsonType, bodyData)
+                            method == "POST" -> okhttp3.RequestBody.create(jsonType, "{}")
+                            else -> null
+                        }
+                        val request = if (method == "POST" && httpBody != null) {
+                            builder.post(httpBody).build()
+                        } else {
+                            builder.build()
+                        }
+                        val client = okhttp3.OkHttpClient().newBuilder()
+                            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                            .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                            .build()
+                        client.newCall(request).execute().use { resp ->
+                            val body = resp.body?.string() ?: ""
+                            call.respondText(body, ContentType.Application.Json, HttpStatusCode(resp.code, "response"))
+                        }
+                    } catch (e: Exception) {
+                        val resp = JSONObject()
+                        resp.put("ok", false)
+                        resp.put("error", "http proxy failed: ${e.message}")
                         call.respondJson(resp.toString(2))
                     }
                 }

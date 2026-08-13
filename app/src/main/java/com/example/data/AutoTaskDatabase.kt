@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import java.io.File
 
 @Database(
     entities = [AutomationProfile::class, ExecutionLog::class],
@@ -20,11 +21,14 @@ abstract class AutoTaskDatabase : RoomDatabase() {
 
         fun getInstance(context: Context): AutoTaskDatabase {
             return INSTANCE ?: synchronized(this) {
+                val dbFile = File(com.example.wa.BrainService.dbPath(context))
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AutoTaskDatabase::class.java,
-                    "autotask.db"
-                ).build()
+                    dbFile.absolutePath // absolute path — openHelperFactory passes it through
+                )
+                    .openHelperFactory(SingleFileOpenHelperFactory(dbFile))
+                    .build()
                 INSTANCE = instance
                 instance
             }
