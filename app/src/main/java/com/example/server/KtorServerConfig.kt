@@ -15,9 +15,16 @@ data class KtorServerSnapshot(
 }
 
 object KtorServerConfig {
-    const val HOST = "127.0.0.1"
+    // Bind on all interfaces so a paired development harness can use the
+    // phone's LAN address. Non-loopback REST requests are bearer-authenticated
+    // by KtorLoopbackServer; the MCP route has its own auth check.
+    const val HOST = "0.0.0.0"
+    const val LOCAL_CLIENT_HOST = "127.0.0.1"
     const val DEFAULT_PORT = 8788
     const val LISTENER_PORT = 8787
+
+    fun isLoopbackHost(host: String): Boolean =
+        host == LOCAL_CLIENT_HOST || host == "::1" || host == "localhost" || host == "::ffff:127.0.0.1"
 
     private const val PREFS_NAME = "autotask_server_config"
     private const val KEY_ENABLED = "ktor_server_enabled"

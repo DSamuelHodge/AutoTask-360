@@ -9,12 +9,14 @@ import com.example.engine.SchemaProvider
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
+import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.call
 import io.ktor.server.cio.CIO
 import io.ktor.server.cio.CIOApplicationEngine
 import okhttp3.MediaType.Companion.toMediaType
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
+import io.ktor.server.request.path
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.delete
@@ -38,7 +40,17 @@ class KtorLoopbackServer(
     fun start() {
         if (serverEngine != null) return
 
-        serverEngine = embeddedServer(CIO, host = "127.0.0.1", port = port) {
+        serverEngine = embeddedServer(CIO, host = KtorServerConfig.HOST, port = port) {
+            intercept(ApplicationCallPipeline.Plugins) {
+                val path = call.request.path()
+                if (path.startsWith("/v1/") && !KtorServerConfig.isLoopbackHost(call.request.local.remoteHost)) {
+                    val expected = "Bearer ${com.example.wa.BrainService.getToken(this@KtorLoopbackServer.context)}"
+                    if (call.request.headers["Authorization"] != expected) {
+                        call.respondError(HttpStatusCode.Unauthorized, "Unauthorized: missing or invalid Bearer token")
+                        finish()
+                    }
+                }
+            }
             routing {
                 // GET /v1/status
                 get("/v1/status") {

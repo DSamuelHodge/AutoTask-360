@@ -25,4 +25,11 @@ class KtorServerConfigTest {
     assertEquals("Port must be between 1024 and 65535.", KtorServerConfig.validatePort(80))
     assertEquals("Port must be between 1024 and 65535.", KtorServerConfig.validatePort(70_000))
   }
+
+  @Test
+  fun loopbackHostsAreRecognized() {
+    assertEquals(true, KtorServerConfig.isLoopbackHost("127.0.0.1"))
+    assertEquals(true, KtorServerConfig.isLoopbackHost("::1"))
+    assertEquals(false, KtorServerConfig.isLoopbackHost("192.168.40.88"))
+  }
 }

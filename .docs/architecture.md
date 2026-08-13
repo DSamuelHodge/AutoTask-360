@@ -41,7 +41,7 @@ socket with Bearer-token auth.
 |---|---|---|---|
 | Engine → brain | UNIX socket `app_brain/cosd.sock` | `Bearer <token>` (persisted in prefs, generated once) | RPC calls (`/v1/brain` proxies, MCP tools) |
 | Brain → engine | loopback TCP `127.0.0.1:8788` | none (loopback-only) | events, `/v1/http` proxy, `/v1/location`, `/v1/contacts` |
-| External → engine | `adb forward tcp:8788` (dev) or tunnel | `/mcp` requires Bearer token; `/v1/*` loopback-only | MCP / HTTP |
+| External → engine | LAN `:8788` or `adb forward tcp:8788` (dev) | `/mcp` and non-loopback `/v1/*` require Bearer token | MCP / HTTP |
 
 The brain socket is app-private (`srwx------`). TCP 8790 is closed in
 production; `--addr` is only a debug override.

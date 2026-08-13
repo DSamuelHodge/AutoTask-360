@@ -18,6 +18,7 @@ class CapabilityOnboardingTest {
         id = "test",
         name = "test",
         triggerType = triggerType,
+        triggerConfigJson = "{}",
         actionsJson = actionsJson
     )
 

@@ -1,7 +1,8 @@
 # HTTP API
 
-All endpoints are served by Ktor on `127.0.0.1:8788` (loopback only) inside
-`KtorLoopbackServer.kt`. The phone is reachable from a host machine via
+All endpoints are served by Ktor on port `8788` inside
+`KtorLoopbackServer.kt`. The default bind is `0.0.0.0`; non-loopback `/v1/*`
+requests require the brain bearer token. A host can also reach the service via
 `adb forward tcp:8788 tcp:8788`.
 
 JSON request/response everywhere. Errors are `{error, code, message}`.

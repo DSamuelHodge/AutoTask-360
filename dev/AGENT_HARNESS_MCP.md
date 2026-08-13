@@ -3,30 +3,30 @@
 This guide connects an agentic harness running on a Mac host to the
 Sapphire-Blu MCP server running inside the Android app.
 
-This is a **local development** setup. Do not expose port `8788` to the LAN or
-internet. The production remote-access design is not implemented yet.
+This is a **local development** setup. LAN access is bearer-authenticated, but
+do not expose port `8788` to the internet. The production remote-access design
+is not implemented yet.
 
 ## Connection topology
 
-The Android Ktor server binds to the phone's loopback interface:
+The Android Ktor server binds to all phone interfaces and protects
+non-loopback REST requests with the brain bearer token:
 
 ```text
 Agent harness on Mac
-  http://127.0.0.1:8788/mcp
-              |
-              | adb forward tcp:8788 tcp:8788
-              v
-Android app 127.0.0.1:8788/mcp
+  http://192.168.40.88:8788/mcp       or       http://127.0.0.1:8788/mcp
+              |                                      |
+              | LAN + bearer token                    | adb forward
+              v                                      v
+Android app 192.168.40.88:8788/mcp       Android app 127.0.0.1:8788/mcp
               |
               | UNIX socket + bearer token
               v
 Rust CoS brain daemon
 ```
 
-The phone LAN address is not a usable MCP URL while the server is configured
-with `host = 127.0.0.1`. For example, `http://192.168.40.88:8788/v1/status`
-will not work in the current default configuration. The phone IP is relevant
-to wireless ADB, not direct HTTP access.
+Use the phone's current LAN IP for direct access. The example phone address is
+`192.168.40.88`; it may change when the phone reconnects to Wi-Fi.
 
 Use `adb forward`, not `adb reverse`:
 
@@ -244,13 +244,17 @@ The server accepts these development origins when an Origin header is sent:
 The same Ktor server exposes the REST control surface at:
 
 ```text
-http://127.0.0.1:8788/v1
+http://<phone-ip>:8788/v1
 ```
 
-Important authentication boundary: the current implementation enforces the
-bearer token on `POST /mcp`, but does **not** enforce it on `/v1/*`. REST
-access is currently protected only by the phone-loopback binding and the ADB
-forward. Do not expose the REST port beyond that development boundary.
+Important authentication boundary: the implementation enforces the bearer
+token on `POST /mcp` and on non-loopback `/v1/*` requests. Requests arriving
+from phone loopback, including the app's internal brain calls and the ADB
+forward path, remain local-trust requests. Direct LAN requests must include:
+
+```text
+Authorization: Bearer <COS_MCP_TOKEN>
+```
 
 All request and response bodies are JSON unless noted otherwise. The normal
 error shape is `{error, code, message}`.
@@ -276,11 +280,13 @@ still return sensitive device state:
 Typical discovery sequence:
 
 ```bash
-curl -sS http://127.0.0.1:8788/v1/status
-curl -sS http://127.0.0.1:8788/v1/schema
-curl -sS http://127.0.0.1:8788/v1/capabilities
-curl -sS http://127.0.0.1:8788/v1/profiles
-curl -sS 'http://127.0.0.1:8788/v1/logs?limit=20'
+BASE_URL="http://<phone-ip>:8788"
+AUTH=(-H "Authorization: Bearer $COS_MCP_TOKEN")
+curl -sS "${AUTH[@]}" "$BASE_URL/v1/status"
+curl -sS "${AUTH[@]}" "$BASE_URL/v1/schema"
+curl -sS "${AUTH[@]}" "$BASE_URL/v1/capabilities"
+curl -sS "${AUTH[@]}" "$BASE_URL/v1/profiles"
+curl -sS "${AUTH[@]}" "$BASE_URL/v1/logs?limit=20"
 ```
 
 Interpret readiness rather than assuming it. For example, the server and
@@ -476,7 +482,7 @@ adb devices
 
 After the wireless ADB connection is active, `adb forward` works the same as
 with USB. The phone and Mac need network reachability, but the MCP client
-still uses `127.0.0.1:8788` on the Mac.
+still uses `127.0.0.1:8788` on the Mac when using the forward.
 
 If the phone advertises a wireless-debugging endpoint such as
 `192.168.40.88:44037` but `adb connect` returns `Connection refused`, the
@@ -484,22 +490,24 @@ endpoint is stale or wireless debugging has been disabled/re-enabled. Open
 **Developer options -> Wireless debugging**, pair again, and use the current
 pairing and connection ports shown by Android.
 
-## Direct LAN access is not the default
+## Direct LAN access
 
-Direct access such as `http://192.168.40.88:8788/v1/status` would require an
-intentional change from `KtorServerConfig.HOST = "127.0.0.1"` to a LAN-facing
-bind such as `0.0.0.0`, plus firewall and authentication work. This is not
-required for the ADB-forward development path.
+Direct access such as `http://192.168.40.88:8788/v1/status` is supported by the
+LAN bind. Non-loopback `/v1/*` requests must include:
+
+```text
+Authorization: Bearer <COS_MCP_TOKEN>
+```
+
+The `/mcp` route always requires the bearer token. The phone firewall, Wi-Fi
+isolation, and changing DHCP address can still prevent LAN access.
 
 There are three connectivity modes:
 
-1. **ADB bridge, recommended for development:** keep loopback binding and use
-   `adb forward`.
-2. **LAN development mode:** bind to a LAN interface only after adding an
-   explicit development guard, firewall policy, and REST authentication.
+1. **ADB bridge:** use `adb forward` and connect to `127.0.0.1` on the host.
+2. **LAN development mode:** connect to the phone IP with the bearer token.
 3. **Production remote mode:** use a dedicated gateway with TLS, scoped keys,
    rotation/revocation, audit logs, rate limits, replay protection,
    read/write permissions, and a kill switch.
 
-Never expose the current unauthenticated `/v1/*` REST surface or port `8788`
-directly to the internet.
+Never expose port `8788` directly to the internet.
