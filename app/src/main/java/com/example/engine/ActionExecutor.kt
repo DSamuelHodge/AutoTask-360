@@ -564,6 +564,7 @@ class ActionExecutor(
         result = result.replace("{{deviceName}}", p["deviceName"]?.toString() ?: "")
 
         result = result.replace("{{packageName}}", p["packageName"]?.toString() ?: "")
+        result = result.replace("{{url}}", p["url"]?.toString() ?: "")
         result = result.replace("{{title}}", p["title"]?.toString() ?: "")
         result = result.replace("{{text}}", p["text"]?.toString() ?: "")
         result = result.replace("{{screenState}}", p["state"]?.toString() ?: p["screenState"]?.toString() ?: "")

@@ -121,6 +121,47 @@ object McpTools {
             )
         ),
         Tool(
+            name = "aware.sms.send",
+            title = "Send SMS",
+            description = "Send an outbound SMS via the native SEND_SMS action. Resolves the " +
+                "recipient by name or phone in the CRM. Returns immediately (async dispatch).",
+            params = schema(
+                "owner" to string("CRM owner id (e.g. 'derrick')", true),
+                "recipient" to string("Recipient name or full international number (+1...)"),
+                "text" to string("SMS body", true),
+            )
+        ),
+        Tool(
+            name = "aware.open",
+            title = "Open in Browser",
+            description = "Open a URL in the phone's default web browser.",
+            params = schema(
+                "owner" to string("CRM owner id (e.g. 'derrick')", true),
+                "url" to string("Web address to open (http/https)", true),
+            )
+        ),
+        Tool(
+            name = "aware.search",
+            title = "Web Search",
+            description = "Search the web (DuckDuckGo) and return the top result titles + URLs.",
+            params = schema(
+                "owner" to string("CRM owner id (e.g. 'derrick')", true),
+                "query" to string("Search query", true),
+            )
+        ),
+        Tool(
+            name = "aware.email",
+            title = "Compose Email",
+            description = "Draft an email in the phone's Gmail app via a mailto: link (no OAuth; " +
+                "compose only).",
+            params = schema(
+                "owner" to string("CRM owner id (e.g. 'derrick')", true),
+                "to" to string("Recipient email address", true),
+                "subject" to string("Email subject"),
+                "body" to string("Email body"),
+            )
+        ),
+        Tool(
             name = "crm.list_contacts",
             title = "List Contacts",
             description = "List all CRM contacts.",
