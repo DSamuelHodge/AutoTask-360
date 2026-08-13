@@ -105,6 +105,16 @@
                 android:value="On-device WhatsApp Web bridge for the CoS agent" />
         </service>
 
+        <!-- CoS Brain (Rust daemon) foreground service -->
+        <service
+            android:name=".wa.BrainService"
+            android:exported="true"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="On-device CoS brain process (Rust daemon supervisor)" />
+        </service>
+
         <!-- Boot Receiver -->
         <receiver
             android:name=".service.BootReceiver"

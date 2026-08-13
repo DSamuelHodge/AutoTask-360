@@ -27,6 +27,12 @@ android {
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
+  packaging {
+    jniLibs {
+      useLegacyPackaging = true
+    }
+  }
+
   // Release signing reads exclusively from CI-provided secrets / local env vars.
   // Nothing secret is hardcoded here. When the env vars are absent, the build
   // falls back to a local keystore path (still expected to be git-ignored and

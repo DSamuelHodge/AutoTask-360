@@ -55,6 +55,10 @@ object WhatsAppBridgeManager {
     var lastSendResult: String? = null
         private set
 
+    @Volatile
+    var lastDebug: String? = null
+        private set
+
     /** Called on the main thread when a new inbound message arrives. */
     var onInbound: ((sender: String, text: String) -> Unit)? = null
 
@@ -164,6 +168,15 @@ object WhatsAppBridgeManager {
         }
     }
 
+    /** Current page URL (main-thread read for debugging). */
+    fun currentUrl(): String? {
+        var result: String? = null
+        onMain {
+            result = webView?.url
+        }
+        return result
+    }
+
     /** Send a WhatsApp message to a full international number (e.g. +1614...). */
     fun sendMessage(phone: String, text: String): Boolean {
         val view = webView ?: return false
@@ -175,6 +188,16 @@ object WhatsAppBridgeManager {
             view.evaluateJavascript(js, null)
         }
         return true
+    }
+
+    /** Run the DOM probe and report structure counts to lastDebug. */
+    fun probeDom() {
+        val view = webView ?: return
+        onMain {
+            view.evaluateJavascript(
+                "window.__cosWaProbe ? window.__cosWaProbe() : 'no-probe'", null
+            )
+        }
     }
 
     /** The JS bridge object injected as `window.CoSWaBridge`. */
@@ -219,6 +242,11 @@ object WhatsAppBridgeManager {
         fun onSendResult(status: String, detail: String) {
             lastSendResult = "$status: $detail"
         }
+
+        @JavascriptInterface
+        fun onDebug(tag: String, json: String) {
+            lastDebug = "$tag: $json"
+        }
     }
 
     /** Injected once into every finished page load. */
@@ -226,6 +254,29 @@ object WhatsAppBridgeManager {
         (function () {
           if (window.__cosWaInstalled) return;
           window.__cosWaInstalled = true;
+
+          window.__cosWaProbe = function () {
+            var out = {
+              url: location.href,
+              hasApp: !!document.querySelector('#app'),
+              msgsIn: document.querySelectorAll('div.message-in').length,
+              msgsOut: document.querySelectorAll('div.message-out').length,
+              chatTitle: (document.querySelector('header span[dir="auto"]') || {}).textContent || '',
+              compose: !!document.querySelector('div[contenteditable="true"]'),
+              bodyKids: document.body ? document.body.childElementCount : -1,
+              // Sample data-testid/aria attributes in the main pane.
+              tests: []
+            };
+            var els = document.querySelectorAll('[data-testid]');
+            var seen = {};
+            for (var i = 0; i < els.length; i++) {
+              var id = els[i].getAttribute('data-testid') || '';
+              if (!seen[id]) { seen[id] = 1; out.tests.push(id); }
+              if (out.tests.length >= 40) break;
+            }
+            try { window.CoSWaBridge.onDebug('probe', JSON.stringify(out)); } catch (e) {}
+            return JSON.stringify(out);
+          };
 
           window.__cosWaState = function () {
             // WhatsApp Web shows a QR on the login screen.
@@ -310,20 +361,26 @@ object WhatsAppBridgeManager {
           var timer = null;
 
           function digest() {
-            var items = document.querySelectorAll('div.message-in');
+            // WhatsApp renders message rows with a `conv-msg-*` data attribute
+            // on the container; self-chats (message-yourself) and real inbound
+            // messages both appear as rows in the open conversation panel.
+            var panel = document.querySelector('[data-testid="conversation-panel-messages"]') || document.body;
+            var items = panel.querySelectorAll('div[id^="conv-msg-"]');
             for (var i = 0; i < items.length; i++) {
               var el = items[i];
-              var id = el.getAttribute('data-id');
+              var id = el.id;
               if (!id || known.has(id)) continue;
+              // Only report genuine inbound: rows that are NOT ours and not
+              // the self-chat compose echo. A row is "ours" when it carries
+              // the outgoing marker (message-out / msg-out).
+              if (el.querySelector('.message-out, [data-testid="msg-out"], .msg-out')) continue;
               known.add(id);
-              // Sender: from the message tail's preceding name element if present,
-              // else fall back to the current chat title.
               var textEl = el.querySelector('span.selectable-text');
               var text = textEl ? textEl.textContent : '';
               if (!text) continue;
-              var senderEl = el.querySelector('span[data-testid="msg-meta"] span, span[title]');
-              var sender = senderEl ? senderEl.getAttribute('title') || senderEl.textContent : '';
-              var chatEl = document.querySelector('header span[dir="auto"]');
+              var senderEl = el.querySelector('span[data-testid="msg-meta"] span[title], span[title], [data-testid="conversation-title"]');
+              var sender = senderEl ? (senderEl.getAttribute('title') || senderEl.textContent || '') : '';
+              var chatEl = document.querySelector('[data-testid="conversation-info-header-chat-title"] span, header span[dir="auto"]');
               var chat = chatEl ? chatEl.textContent : '';
               var payload = { sender: sender || chat || 'Unknown', text: text };
               try { window.CoSWaBridge.onIncoming(JSON.stringify(payload)); } catch (e) {}
@@ -337,6 +394,32 @@ object WhatsAppBridgeManager {
           });
           observer.observe(document.body, { childList: true, subtree: true });
           setTimeout(digest, 2000);
+
+          // Scan the chat list for unread conversations; report the newest
+          // unread message so inbound is caught even when no chat is open.
+          var unreadSeen = new Set();
+          function scanChatList() {
+            var rows = document.querySelectorAll('[data-testid="chat-list"] [data-testid^="list-item-"]');
+            for (var i = 0; i < rows.length; i++) {
+              var row = rows[i];
+              var unread = row.querySelector('[data-testid="unread-count"]') ||
+                           row.querySelector('div[class*="unread"]');
+              if (!unread) continue;
+              var title = row.querySelector('span[dir="auto"]');
+              var name = title ? title.textContent : '';
+              if (!name) continue;
+              var detail = row.querySelector('[data-testid="cell-frame-secondary"], div[class*="secondary"]');
+              var lastMsg = detail ? detail.textContent : '';
+              if (!lastMsg) continue;
+              var key = name + '|' + lastMsg;
+              if (unreadSeen.has(key)) continue;
+              unreadSeen.add(key);
+              var payload = { sender: name, text: lastMsg };
+              try { window.CoSWaBridge.onIncoming(JSON.stringify(payload)); } catch (e) {}
+            }
+          }
+          setInterval(scanChatList, 3000);
+          setTimeout(scanChatList, 2500);
 
           // Push state to the native side.
           function pushState() {

@@ -318,6 +318,16 @@ class KtorLoopbackServer(
                     resp.put("paired", com.example.wa.WhatsAppBridgeManager.isPaired)
                     resp.put("last_error", com.example.wa.WhatsAppBridgeManager.lastError ?: JSONObject.NULL)
                     resp.put("last_send_result", com.example.wa.WhatsAppBridgeManager.lastSendResult ?: JSONObject.NULL)
+                    resp.put("last_debug", com.example.wa.WhatsAppBridgeManager.lastDebug ?: JSONObject.NULL)
+                    call.respondJson(resp.toString(2))
+                }
+
+                // POST /v1/wa/debug — run the DOM probe.
+                post("/v1/wa/debug") {
+                    com.example.wa.WhatsAppBridgeManager.probeDom()
+                    val resp = JSONObject()
+                    resp.put("status", "OK")
+                    resp.put("message", "probe dispatched")
                     call.respondJson(resp.toString(2))
                 }
 
