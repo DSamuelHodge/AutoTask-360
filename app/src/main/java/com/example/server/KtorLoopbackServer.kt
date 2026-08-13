@@ -319,6 +319,8 @@ class KtorLoopbackServer(
                     resp.put("sock", com.example.wa.BrainService.sockPath(context))
                     resp.put("db", com.example.wa.BrainService.dbPath(context))
                     resp.put("last_error", com.example.wa.BrainService.lastError ?: JSONObject.NULL)
+                    resp.put("supervisor", com.example.wa.BrainService.statusJson())
+                    resp.put("health", com.example.wa.HealthMonitor.statusJson())
                     call.respondJson(resp.toString(2))
                 }
 

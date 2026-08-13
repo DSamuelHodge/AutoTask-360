@@ -14,6 +14,9 @@ class BootReceiver : BroadcastReceiver() {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
             // Start AutoTask foreground service
             AutoTaskService.startService(context)
+            // Start the CoS brain (supervised) + passive health monitor
+            com.example.wa.BrainService.startService(context)
+            com.example.wa.HealthMonitor.startService(context)
 
             // Dispatch BOOT automation event
             CoroutineScope(Dispatchers.IO).launch {

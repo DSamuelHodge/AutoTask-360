@@ -115,6 +115,16 @@
                 android:value="On-device CoS brain process (Rust daemon supervisor)" />
         </service>
 
+        <!-- CoS Health Monitor (passive grant-drift detection) -->
+        <service
+            android:name=".wa.HealthMonitor"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Passive special-access grant health monitoring" />
+        </service>
+
         <!-- Boot Receiver -->
         <receiver
             android:name=".service.BootReceiver"
