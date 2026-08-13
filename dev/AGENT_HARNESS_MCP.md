@@ -156,6 +156,46 @@ The Codex MCP client reads `COS_MCP_TOKEN` and sends:
 Authorization: Bearer <token>
 ```
 
+### Codex stdio compatibility bridge
+
+The Android server currently implements `POST /mcp` only. It does not
+implement an SSE/streaming `GET /mcp`; `GET /mcp` correctly returns `405
+Method Not Allowed`. Some Codex HTTP transport checks probe `GET /mcp`, which
+produces a `cos SSE error: Non-200 status code (405)` even though POST-based
+MCP calls are healthy.
+
+For Codex, use a local stdio bridge that translates Codex stdio MCP messages
+into authenticated HTTP POST requests:
+
+```toml
+[mcp_servers.cos]
+command = "/Users/<user>/.codex/bin/cos-mcp-stdio"
+```
+
+The bridge should:
+
+- Read the token from Pass, for example
+  `pass show autotask/sapphire-blu/brain-token`.
+- Send MCP requests to `http://127.0.0.1:8788/mcp`.
+- Keep protocol responses on stdout only.
+- Send diagnostics to stderr, never stdout.
+- Never print the bearer token.
+
+The host-specific implementation used during development is:
+
+```text
+/Users/<user>/.codex/bin/cos-mcp-stdio
+/Users/<user>/.codex/bin/cos-mcp-stdio.js
+```
+
+This bridge is a Codex host integration, not an Android app component, and
+should not be committed with credentials. It was verified to expose the 16
+CoS tools over stdio.
+
+After changing global MCP configuration, fully quit and reopen Codex or start
+a new task. An already-running chat does not hot-load newly configured MCP
+tools.
+
 ## OpenCode configuration
 
 In `~/.config/opencode/opencode.jsonc`:
