@@ -24,6 +24,7 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -382,6 +383,38 @@ class KtorLoopbackServer(
                     }
                 }
 
+                // GET /v1/location — last known GPS fix for the brain's
+                // travel/commute inference (the daemon has no location APIs;
+                // the engine does via its granted ACCESS_FINE_LOCATION).
+                get("/v1/location") {
+                    val resp = JSONObject()
+                    try {
+                        val lm = context.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+                        val providers = mutableListOf(android.location.LocationManager.NETWORK_PROVIDER)
+                        if (lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER)) {
+                            providers.add(0, android.location.LocationManager.GPS_PROVIDER)
+                        }
+                        val loc = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            requestSingleUpdate(lm, providers)
+                        }
+                        if (loc != null) {
+                            resp.put("ok", true)
+                            resp.put("latitude", loc.latitude)
+                            resp.put("longitude", loc.longitude)
+                            resp.put("accuracy", loc.accuracy)
+                            resp.put("time", loc.time)
+                            resp.put("provider", loc.provider)
+                        } else {
+                            resp.put("ok", false)
+                            resp.put("error", "no location fix (single update timed out)")
+                        }
+                    } catch (e: Exception) {
+                        resp.put("ok", false)
+                        resp.put("error", e.message)
+                    }
+                    call.respondJson(resp.toString(2))
+                }
+
                 // POST /v1/ota/config — set the update URL (persisted).
                 post("/v1/ota/config") {
                     val bodyText = call.receiveText()
@@ -559,6 +592,59 @@ class KtorLoopbackServer(
 
     private suspend fun ApplicationCall.respondJson(text: String, status: HttpStatusCode = HttpStatusCode.OK) {
         respondText(text, ContentType.Application.Json, status)
+    }
+
+    /**
+     * Request one fresh location fix (async, ~4s timeout). Falls back to the
+     * last-known fix so a moving or stationary phone both answer quickly.
+     */
+    private suspend fun requestSingleUpdate(
+        lm: android.location.LocationManager,
+        providers: List<String>,
+    ): android.location.Location? = kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+        var done = false
+        val listener = object : android.location.LocationListener {
+            override fun onLocationChanged(loc: android.location.Location) {
+                if (!done) {
+                    done = true
+                    try { lm.removeUpdates(this) } catch (_: Exception) {}
+                    cont.resume(loc)
+                }
+            }
+        }
+        val lastKnown = providers.firstNotNullOfOrNull { p ->
+            try { lm.getLastKnownLocation(p) } catch (_: Exception) { null }
+        }
+        // If ANY cached fix exists, use it immediately (age-bounded: 48h).
+        // A stationary phone may never produce a fresh network fix; the cached
+        // one is still a useful commute estimate for the brain.
+        if (lastKnown != null && System.currentTimeMillis() - lastKnown.time < 48L * 3600_000L) {
+            done = true
+            cont.resume(lastKnown)
+            return@suspendCancellableCoroutine
+        }
+        var requestedAny = false
+        for (p in providers) {
+            try {
+                lm.requestSingleUpdate(p, listener, android.os.Looper.getMainLooper())
+                requestedAny = true
+            } catch (_: Exception) {}
+        }
+        if (!requestedAny) {
+            if (!done) { done = true; cont.resume(lastKnown) }
+            return@suspendCancellableCoroutine
+        }
+        cont.invokeOnCancellation {
+            if (!done) { done = true; try { lm.removeUpdates(listener) } catch (_: Exception) {} }
+        }
+        // Timeout fallback to last-known (may be null).
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (!done) {
+                done = true
+                try { lm.removeUpdates(listener) } catch (_: Exception) {}
+                cont.resume(lastKnown)
+            }
+        }, 4000L)
     }
 
     private suspend fun ApplicationCall.respondError(status: HttpStatusCode, message: String) {

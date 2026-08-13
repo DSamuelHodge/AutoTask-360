@@ -41,6 +41,38 @@ class AutoTaskEngine private constructor(
         scope.launch {
             repository.seedDefaultRecipesIfNeeded()
         }
+        // One-shot location warm-up: the LocationManager only serves
+        // getLastKnownLocation to apps that have (recently) been active
+        // consumers. A single passive request makes the cached fix visible to
+        // /v1/location (used by the brain's travel/commute inference).
+        try {
+            val lm = context.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+            val ok = androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.ACCESS_FINE_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (ok && (lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER) ||
+                        lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER))) {
+                val locListener = object : android.location.LocationListener {
+                    override fun onLocationChanged(location: android.location.Location) {}
+                    override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
+                    override fun onProviderEnabled(provider: String) {}
+                    override fun onProviderDisabled(provider: String) {}
+                }
+                val provider = if (lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)) {
+                    android.location.LocationManager.NETWORK_PROVIDER
+                } else {
+                    android.location.LocationManager.GPS_PROVIDER
+                }
+                scope.launch {
+                    kotlinx.coroutines.delay(1000)
+                    try {
+                        lm.requestLocationUpdates(provider, 0L, 0f, locListener, android.os.Looper.getMainLooper())
+                        kotlinx.coroutines.delay(3000)
+                        lm.removeUpdates(locListener)
+                    } catch (_: Exception) {}
+                }
+            }
+        } catch (_: Exception) {}
     }
 
     suspend fun processEvent(event: AutomationEvent): List<ExecutionLog> = mutex.withLock {
