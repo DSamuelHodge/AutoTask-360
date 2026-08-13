@@ -194,6 +194,145 @@ The server accepts these development origins when an Origin header is sent:
 - `http://127.0.0.1:8788`
 - `http://localhost:8788`
 
+## REST API endpoints
+
+The same Ktor server exposes the REST control surface at:
+
+```text
+http://127.0.0.1:8788/v1
+```
+
+Important authentication boundary: the current implementation enforces the
+bearer token on `POST /mcp`, but does **not** enforce it on `/v1/*`. REST
+access is currently protected only by the phone-loopback binding and the ADB
+forward. Do not expose the REST port beyond that development boundary.
+
+All request and response bodies are JSON unless noted otherwise. The normal
+error shape is `{error, code, message}`.
+
+### Safe read and discovery endpoints
+
+These are the preferred first calls for an agent. They are read-only, but may
+still return sensitive device state:
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/v1/status` | Engine, Ktor, permission-readiness, profile/log counts, version, and uptime. |
+| `GET` | `/v1/schema` | Trigger/action schema, template variables, risk, and autonomy metadata. |
+| `GET` | `/v1/capabilities` | Runtime permissions, special access, repair actions, readiness, and agent policy. |
+| `GET` | `/v1/profiles` | List automation profiles. |
+| `GET` | `/v1/profiles/{id}` | Read one automation profile. |
+| `GET` | `/v1/logs?limit=N` | Read recent execution logs; default limit is 100. |
+| `GET` | `/v1/brain/status` | Rust brain process, socket, database, supervisor, and health state. |
+| `GET` | `/v1/ota/status` | Installed version, update URL, and install capability. |
+| `GET` | `/v1/wa/status` | WhatsApp bridge running, pairing, error, and send state. |
+| `GET` | `/v1/screen` | Current accessibility tree and screen metadata; requires accessibility enabled and is highly sensitive. |
+
+Typical discovery sequence:
+
+```bash
+curl -sS http://127.0.0.1:8788/v1/status
+curl -sS http://127.0.0.1:8788/v1/schema
+curl -sS http://127.0.0.1:8788/v1/capabilities
+curl -sS http://127.0.0.1:8788/v1/profiles
+curl -sS 'http://127.0.0.1:8788/v1/logs?limit=20'
+```
+
+Interpret readiness rather than assuming it. For example, the server and
+engine can be healthy while `notification_listener_enabled` or `dnd_ready`
+is false. Calendar runtime permissions can be granted while a CoS briefing
+still fails because of owner, calendar selection, or brain-side data mapping.
+
+### Automation and profile endpoints
+
+| Method | Endpoint | Purpose and safety |
+|---|---|---|
+| `POST` | `/v1/profiles` | Create or upsert a profile. Validate against `/v1/schema` first. |
+| `PATCH` | `/v1/profiles/{id}` | Partially update a profile. |
+| `DELETE` | `/v1/profiles/{id}` | Delete a profile; destructive. |
+| `POST` | `/v1/events` | Fire an event. Supports `dryRun`, `targetProfileId`, and `payload`; may execute real actions. |
+| `DELETE` | `/v1/logs` | Clear execution logs; destructive and irreversible. |
+
+`POST /v1/events` body:
+
+```json
+{
+  "triggerType": "MANUAL",
+  "dryRun": true,
+  "targetProfileId": "optional-profile-id",
+  "payload": {}
+}
+```
+
+Agents must use `dryRun: true` before any event that could send SMS, place a
+call, change device settings, drive the UI, send WhatsApp, or open an external
+URL. Use `targetProfileId` when targeting one manual profile. Never assume a
+manual event is harmless.
+
+### Brain and network bridge endpoints
+
+| Method | Endpoint | Purpose and safety |
+|---|---|---|
+| `POST` | `/v1/brain` | Forward a JSON-RPC-style request to the Rust brain. May trigger CRM, calendar, messaging, browser, or device actions. |
+| `POST` | `/v1/http` | Engine-owned outbound HTTP proxy for search, geocoding, routing, and integrations. Treat URLs, headers, and data as sensitive/high risk. |
+
+`POST /v1/brain` example:
+
+```json
+{
+  "method": "aware.deals",
+  "params": {"owner": "derrick"}
+}
+```
+
+The available brain methods are documented in `.docs/daemon-rpc.md`. MCP tool
+calls are normally preferred because they expose the bounded tool registry;
+use `/v1/brain` only when the harness explicitly needs the lower-level RPC
+surface.
+
+### Device data endpoints
+
+| Method | Endpoint | Purpose and safety |
+|---|---|---|
+| `POST` | `/v1/contacts` | Read the device address book; requires `READ_CONTACTS`. Highly sensitive. |
+| `POST` | `/v1/location` | Request/read a GPS fix; requires location access. Highly sensitive. |
+
+These endpoints use `POST` even when the operation is read-only.
+
+### Accessibility endpoints
+
+These require the CoS Screen Access accessibility service:
+
+| Method | Endpoint | Purpose and safety |
+|---|---|---|
+| `GET` | `/v1/screen` | Read the active accessibility tree. |
+| `POST` | `/v1/ui/tap` | Tap screen coordinates; side effect. Body: `{x, y}`. |
+| `POST` | `/v1/ui/type` | Type into the focused field; side effect. Body: `{text}`. |
+| `POST` | `/v1/ui/global` | Execute `back`, `home`, `recents`, `notifications`, or `quick_settings`; side effect. |
+
+Never use UI-driving endpoints for login, payment, deletion, messaging, or
+other high-impact actions without explicit user confirmation.
+
+### OTA endpoints
+
+| Method | Endpoint | Purpose and safety |
+|---|---|---|
+| `POST` | `/v1/ota/config` | Persist the update manifest URL. |
+| `POST` | `/v1/ota/check` | Fetch and compare an update manifest. |
+| `POST` | `/v1/ota/install` | Download, verify, and launch Android package installation; high risk and user-confirmed. |
+
+The OTA flow verifies SHA-256 and signing certificate before requesting the
+system install confirmation. Agents must not change the update URL or install
+an update without explicit authorization.
+
+### WhatsApp bridge endpoints
+
+| Method | Endpoint | Purpose and safety |
+|---|---|---|
+| `GET` | `/v1/wa/status` | Read bridge state. |
+| `POST` | `/v1/wa/debug` | Probe the WebView DOM. |
+| `POST` | `/v1/wa/send` | Send a WhatsApp message; high risk and confirmation-required. Body: `{phone, text}`. |
+
 ## Manual authenticated smoke test
 
 ```bash
