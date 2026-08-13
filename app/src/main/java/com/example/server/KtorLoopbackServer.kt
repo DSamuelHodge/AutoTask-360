@@ -383,10 +383,57 @@ class KtorLoopbackServer(
                     }
                 }
 
-                // GET /v1/location — last known GPS fix for the brain's
+                // POST /v1/contacts — the device address book for the brain's
+                // sync_contacts / mention-resolution (the daemon has no
+                // ContactsContract access; the engine does via READ_CONTACTS;
+                // the daemon reads it with a POST).
+                post("/v1/contacts") {
+                    val resp = JSONObject()
+                    try {
+                        val ok = androidx.core.content.ContextCompat.checkSelfPermission(
+                            context, android.Manifest.permission.READ_CONTACTS
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        if (!ok) {
+                            resp.put("ok", false)
+                            resp.put("error", "READ_CONTACTS not granted")
+                            call.respondJson(resp.toString(2))
+                            return@post
+                        }
+                        val arr = JSONArray()
+                        val resolver = context.contentResolver
+                        val projection = arrayOf(
+                            android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                            android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER,
+                        )
+                        resolver.query(
+                            android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                            projection, null, null, null
+                        )?.use { cursor ->
+                            val nameIdx = cursor.getColumnIndex(android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                            val numIdx = cursor.getColumnIndex(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER)
+                            while (cursor.moveToNext()) {
+                                val name = if (nameIdx >= 0) cursor.getString(nameIdx) ?: "" else ""
+                                val number = if (numIdx >= 0) cursor.getString(numIdx) ?: "" else ""
+                                if (name.isNotBlank() && number.isNotBlank()) {
+                                    arr.put(JSONObject().put("name", name).put("number", number))
+                                }
+                            }
+                        }
+                        resp.put("ok", true)
+                        resp.put("contacts", arr)
+                        resp.put("count", arr.length())
+                    } catch (e: Exception) {
+                        resp.put("ok", false)
+                        resp.put("error", e.message)
+                    }
+                    call.respondJson(resp.toString(2))
+                }
+
+                // POST /v1/location — last known GPS fix for the brain's
                 // travel/commute inference (the daemon has no location APIs;
-                // the engine does via its granted ACCESS_FINE_LOCATION).
-                get("/v1/location") {
+                // the engine does via its granted ACCESS_FINE_LOCATION; the
+                // daemon reads it with a POST).
+                post("/v1/location") {
                     val resp = JSONObject()
                     try {
                         val lm = context.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
