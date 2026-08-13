@@ -45,6 +45,7 @@
     <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:allowBackup="false"
@@ -134,6 +135,26 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <!-- OTA self-update install result -->
+        <receiver
+            android:name=".ota.OtaInstallReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.autotask.OTA_INSTALL_RESULT" />
+            </intent-filter>
+        </receiver>
+
+        <!-- OTA APK sharing (ACTION_INSTALL_PACKAGE confirmation) -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
         <!-- AutoTask ContentProvider -->
         <provider

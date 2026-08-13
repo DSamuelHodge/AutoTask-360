@@ -382,9 +382,80 @@ class KtorLoopbackServer(
                     }
                 }
 
+                // POST /v1/ota/config — set the update URL (persisted).
+                post("/v1/ota/config") {
+                    val bodyText = call.receiveText()
+                    try {
+                        val json = JSONObject(bodyText)
+                        val url = json.optString("updateUrl", "")
+                        if (url.isBlank()) {
+                            call.respondError(HttpStatusCode.BadRequest, "updateUrl is required")
+                            return@post
+                        }
+                        com.example.ota.OtaUpdater.setUpdateUrl(context, url)
+                        val resp = JSONObject()
+                        resp.put("status", "OK")
+                        resp.put("update_url", url)
+                        call.respondJson(resp.toString(2))
+                    } catch (e: Exception) {
+                        call.respondError(HttpStatusCode.BadRequest, "Invalid JSON body: ${e.localizedMessage}")
+                    }
+                }
+
+                // GET /v1/ota/status — current version + update readiness.
+                get("/v1/ota/status") {
+                    val resp = JSONObject()
+                    resp.put("version_code", com.example.BuildConfig.VERSION_CODE)
+                    resp.put("version_name", com.example.BuildConfig.VERSION_NAME)
+                    resp.put("update_url", com.example.ota.OtaUpdater.getUpdateUrl(context))
+                    resp.put("can_request_install", com.example.ota.OtaUpdater.canRequestInstall(context))
+                    call.respondJson(resp.toString(2))
+                }
+
+                // POST /v1/ota/check — fetch the manifest and compare versions.
+                post("/v1/ota/check") {
+                    val bodyText = call.receiveText()
+                    val updateUrl = try {
+                        JSONObject(bodyText).optString("updateUrl", "").takeIf { it.isNotBlank() }
+                    } catch (_: Exception) { null }
+                    val resp = com.example.ota.OtaUpdater.check(context, updateUrl)
+                    val status = if (resp.optBoolean("ok", false)) HttpStatusCode.OK else HttpStatusCode.BadGateway
+                    call.respondJson(resp.toString(2), status)
+                }
+
+                // POST /v1/ota/install — download, verify (sha256 + signing cert), install.
+                post("/v1/ota/install") {
+                    val bodyText = call.receiveText()
+                    val updateUrl = try {
+                        JSONObject(bodyText).optString("updateUrl", "").takeIf { it.isNotBlank() }
+                    } catch (_: Exception) { null }
+                    if (!com.example.ota.OtaUpdater.canRequestInstall(context)) {
+                        call.respondError(HttpStatusCode.Forbidden, "Unknown-source installs not allowed for this app")
+                        return@post
+                    }
+                    try {
+                        val resp = com.example.ota.OtaUpdater.install(context, updateUrl)
+                        call.respondJson(resp.toString(2))
+                    } catch (e: Exception) {
+                        call.respondError(HttpStatusCode.InternalServerError, "OTA install failed: ${e.message}")
+                    }
+                }
+
                 // POST /mcp — stateless MCP endpoint (protocol 2026-07-28).
                 // One JSON-RPC request per HTTP request; no sessions.
                 post("/mcp") {
+                    // Bearer-token auth mirroring the brain's UNIX socket: the
+                    // MCP surface is app-level, so it uses the same shared token.
+                    val auth = call.request.headers["Authorization"]
+                    val expected = "Bearer ${com.example.wa.BrainService.getToken(context)}"
+                    if (auth != expected) {
+                        call.respondText(
+                            com.example.mcp.McpHandler.error("Unauthorized: missing or invalid Bearer token").toString(),
+                            io.ktor.http.ContentType.Application.Json,
+                            HttpStatusCode.Unauthorized
+                        )
+                        return@post
+                    }
                     // Origin check against DNS-rebinding (loopback server).
                     val origin = call.request.headers["Origin"]
                     if (origin != null && origin.isNotBlank()) {
