@@ -45,7 +45,7 @@ S=<serial>
 adb -s $S shell am start-foreground-service -n com.aistudio.autotask.svcqx/com.example.service.AutoTaskService -a com.example.autotask.action.START
 adb -s $S shell am start-foreground-service -n com.aistudio.autotask.svcqx/com.example.wa.BrainService -a com.example.autotask.action.BRAIN_START
 adb -s $S shell am start-foreground-service -n com.aistudio.autotask.svcqx/com.example.wa.WhatsAppBridgeService -a com.example.autotask.action.WA_START
-adb -s $S reverse tcp:8788 tcp:8788   # reach the loopback server from the host
+adb -s $S forward tcp:8788 tcp:8788   # reach the loopback server from the host
 ```
 
 `BootReceiver` restarts everything on `BOOT_COMPLETED` / `MY_PACKAGE_REPLACED`.
@@ -90,7 +90,7 @@ curl -s -X POST http://127.0.0.1:18991/ -d '{"method":"aware.deals","params":{"o
 ```
 
 Note: the host daemon's engine calls default to `AUTOTASK_URL` =
-`http://127.0.0.1:8788` (the phone's engine via adb reverse).
+`http://127.0.0.1:8788` (the phone's engine via adb forward).
 
 ## Known environmental caveats
 

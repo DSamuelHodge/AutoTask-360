@@ -2,7 +2,7 @@
 
 All endpoints are served by Ktor on `127.0.0.1:8788` (loopback only) inside
 `KtorLoopbackServer.kt`. The phone is reachable from a host machine via
-`adb reverse tcp:8788 tcp:8788`.
+`adb forward tcp:8788 tcp:8788`.
 
 JSON request/response everywhere. Errors are `{error, code, message}`.
 

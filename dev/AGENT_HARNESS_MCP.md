@@ -23,6 +23,11 @@ Android app 127.0.0.1:8788/mcp
 Rust CoS brain daemon
 ```
 
+The phone LAN address is not a usable MCP URL while the server is configured
+with `host = 127.0.0.1`. For example, `http://192.168.40.88:8788/v1/status`
+will not work in the current default configuration. The phone IP is relevant
+to wireless ADB, not direct HTTP access.
+
 Use `adb forward`, not `adb reverse`:
 
 ```bash
@@ -472,3 +477,29 @@ adb devices
 After the wireless ADB connection is active, `adb forward` works the same as
 with USB. The phone and Mac need network reachability, but the MCP client
 still uses `127.0.0.1:8788` on the Mac.
+
+If the phone advertises a wireless-debugging endpoint such as
+`192.168.40.88:44037` but `adb connect` returns `Connection refused`, the
+endpoint is stale or wireless debugging has been disabled/re-enabled. Open
+**Developer options -> Wireless debugging**, pair again, and use the current
+pairing and connection ports shown by Android.
+
+## Direct LAN access is not the default
+
+Direct access such as `http://192.168.40.88:8788/v1/status` would require an
+intentional change from `KtorServerConfig.HOST = "127.0.0.1"` to a LAN-facing
+bind such as `0.0.0.0`, plus firewall and authentication work. This is not
+required for the ADB-forward development path.
+
+There are three connectivity modes:
+
+1. **ADB bridge, recommended for development:** keep loopback binding and use
+   `adb forward`.
+2. **LAN development mode:** bind to a LAN interface only after adding an
+   explicit development guard, firewall policy, and REST authentication.
+3. **Production remote mode:** use a dedicated gateway with TLS, scoped keys,
+   rotation/revocation, audit logs, rate limits, replay protection,
+   read/write permissions, and a kill switch.
+
+Never expose the current unauthenticated `/v1/*` REST surface or port `8788`
+directly to the internet.

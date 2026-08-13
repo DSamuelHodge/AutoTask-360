@@ -58,7 +58,7 @@ Each tool forwards to the brain via the UNIX socket (`BrainClient.call`) with
 
 ## Client wiring
 
-The phone's MCP server is reached over `adb reverse tcp:8788 tcp:8788`. In
+The phone's MCP server is reached over `adb forward tcp:8788 tcp:8788`. In
 `~/.config/opencode/opencode.jsonc` the `cos` entry points at
 `http://127.0.0.1:8788/mcp` with `Authorization: Bearer <token>` (the same
 token the brain socket uses, generated once and persisted in the app prefs).
