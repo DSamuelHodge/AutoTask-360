@@ -338,6 +338,41 @@ class KtorLoopbackServer(
                     }
                 }
 
+                // POST /mcp — stateless MCP endpoint (protocol 2026-07-28).
+                // One JSON-RPC request per HTTP request; no sessions.
+                post("/mcp") {
+                    // Origin check against DNS-rebinding (loopback server).
+                    val origin = call.request.headers["Origin"]
+                    if (origin != null && origin.isNotBlank()) {
+                        val okOrigin = origin == "http://127.0.0.1:8788" || origin == "http://localhost:8788"
+                        if (!okOrigin) {
+                            call.respondText(
+                                com.example.mcp.McpHandler.error("Origin not allowed").toString(),
+                                io.ktor.http.ContentType.Application.Json,
+                                HttpStatusCode.Forbidden
+                            )
+                            return@post
+                        }
+                    }
+                    val bodyText = call.receiveText()
+                    val headers = mutableMapOf<String, String>()
+                    for (k in call.request.headers.names()) {
+                        headers[k] = call.request.headers[k] ?: ""
+                    }
+                    val result = com.example.mcp.McpHandler.handle(context, headers, bodyText)
+                    val status = when (result.status) {
+                        400 -> HttpStatusCode.BadRequest
+                        403 -> HttpStatusCode.Forbidden
+                        404 -> HttpStatusCode.NotFound
+                        else -> HttpStatusCode.OK
+                    }
+                    call.respondText(
+                        result.json.toString(),
+                        io.ktor.http.ContentType.Application.Json,
+                        status
+                    )
+                }
+
                 // GET /v1/wa/status — WhatsApp Web bridge state.
                 get("/v1/wa/status") {
                     val resp = JSONObject()
