@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">AutoTask</string>
+    <string name="accessibility_service_desc">Grants CoS the ability to read what is on screen and perform gestures (tap, type, back) in other apps. Used only for situational awareness and cross-app actions you ask for.</string>
 </resources>

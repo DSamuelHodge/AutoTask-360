@@ -115,6 +115,12 @@ class ActionExecutor(
         profile: AutomationProfile,
         event: AutomationEvent
     ): StepResult {
+        // Capability policy gate: every inbound-triggered action is validated
+        // against live capability state before it runs (untrusted-input → local
+        // privileged action trust boundary). Missing capability → SKIPPED.
+        CapabilityPolicy.require(context, type, params)?.let { reason ->
+            return StepResult(stepIndex, type, "SKIPPED", reason)
+        }
         return try {
             when (type) {
                 "NOTIFICATION" -> {
@@ -362,6 +368,30 @@ class ActionExecutor(
                         } else {
                             StepResult(stepIndex, type, "FAILED", "App package $pkg not installed")
                         }
+                    }
+                }
+
+                // Generic resolve-and-actuate intent (the "message bus"). Works
+                // for any scheme an app is registered to handle (whatsapp://,
+                // mailto:, geo:, tel:, https:). `data` may be a full URI or a
+                // scheme + target (e.g. scheme=whatsapp, target=+15551234567).
+                "SEND_INTENT" -> {
+                    val rawData = params.optString("data", "")
+                    val scheme = params.optString("scheme", "")
+                    val target = params.optString("target", "")
+                    val data = when {
+                        rawData.isNotBlank() -> rawData
+                        scheme.isNotBlank() -> "$scheme://$target"
+                        else -> ""
+                    }
+                    if (data.isBlank()) {
+                        StepResult(stepIndex, type, "FAILED", "SEND_INTENT requires 'data' or 'scheme'+'target'")
+                    } else {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(data)).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
+                        StepResult(stepIndex, type, "OK", "Sent intent: $data")
                     }
                 }
 

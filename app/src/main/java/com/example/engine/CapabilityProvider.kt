@@ -73,6 +73,7 @@ object CapabilityProvider {
             "background_location_granted" to isRuntimePermissionGranted(context, Manifest.permission.ACCESS_BACKGROUND_LOCATION, Build.VERSION_CODES.Q),
             "activity_recognition_granted" to isRuntimePermissionGranted(context, Manifest.permission.ACTIVITY_RECOGNITION, Build.VERSION_CODES.Q),
             "notification_listener_enabled" to notificationListenerEnabled,
+            "accessibility_enabled" to isAccessibilityEnabled(context),
             "dnd_ready" to (notificationPolicyDeclared && notificationPolicyGranted),
             "device_settings_ready" to (writeSettingsDeclared && writeSettingsGranted)
         )
@@ -312,6 +313,7 @@ object CapabilityProvider {
         obj.put("manage_external_storage", specialAccessEntry(summary["manage_external_storage_granted"] == true, "Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION", "Required only for broad shared-storage file operations."))
         obj.put("exact_alarm", specialAccessEntry(summary["exact_alarm_granted"] == true, "Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM", "Required for exact time alarms on Android 12+."))
         obj.put("notification_listener", specialAccessEntry(summary["notification_listener_enabled"] == true, "Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS", "Required for notification trigger ingestion."))
+        obj.put("accessibility", specialAccessEntry(summary["accessibility_enabled"] == true, "Settings.ACTION_ACCESSIBILITY_SETTINGS", "The 'eyes and hands' layer: screen reads, taps, typing, global actions for cross-app awareness and driving."))
         obj.put("draw_over_apps", specialAccessEntry(summary["system_alert_window_granted"] == true, "Settings.ACTION_MANAGE_OVERLAY_PERMISSION", "Reserved for future overlay/assistive UI surfaces."))
         return obj
     }
@@ -493,6 +495,10 @@ object CapabilityProvider {
         val enabled = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners") ?: return false
         val expected = ComponentName(context, AutoTaskNotificationListener::class.java).flattenToString()
         return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
+    }
+
+    private fun isAccessibilityEnabled(context: Context): Boolean {
+        return com.example.accessibility.CoSAccessibilityService.isEnabled(context)
     }
 
     private fun isSystemAlertWindowGranted(context: Context): Boolean {

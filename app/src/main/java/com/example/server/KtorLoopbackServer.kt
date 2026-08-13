@@ -415,6 +415,70 @@ class KtorLoopbackServer(
                     call.respondJson(resp.toString(2))
                 }
 
+                // GET /v1/screen — what's on screen right now (accessibility
+                // "eyes"). Walks the active window's accessibility tree.
+                get("/v1/screen") {
+                    val enabled = com.example.accessibility.CoSAccessibilityService.isEnabled(context)
+                    val resp = JSONObject()
+                    resp.put("enabled", enabled)
+                    resp.put("bound", com.example.accessibility.CoSAccessibilityService.isBound)
+                    resp.put("last_event_pkg", com.example.accessibility.CoSAccessibilityService.lastEventPkg ?: JSONObject.NULL)
+                    resp.put("last_event_text", com.example.accessibility.CoSAccessibilityService.lastEventText ?: JSONObject.NULL)
+                    if (!enabled) {
+                        resp.put("ok", false)
+                        resp.put("error", "Accessibility not granted. Enable CoS Screen Access in Settings.")
+                        call.respondJson(resp.toString(2))
+                        return@get
+                    }
+                    resp.put("screen", com.example.accessibility.CoSAccessibilityService.screenDump())
+                    call.respondJson(resp.toString(2))
+                }
+
+                // POST /v1/ui/tap — synthesize a tap at screen coords (accessibility "hands").
+                post("/v1/ui/tap") {
+                    val bodyText = call.receiveText()
+                    try {
+                        val json = JSONObject(bodyText)
+                        val x = json.getDouble("x").toFloat()
+                        val y = json.getDouble("y").toFloat()
+                        call.respondJson(com.example.accessibility.CoSAccessibilityService.tap(x, y).toString(2))
+                    } catch (e: Exception) {
+                        call.respondError(HttpStatusCode.BadRequest, "tap requires x and y: ${e.message}")
+                    }
+                }
+
+                // POST /v1/ui/type — set text into the focused editable field.
+                post("/v1/ui/type") {
+                    val bodyText = call.receiveText()
+                    try {
+                        val json = JSONObject(bodyText)
+                        val text = json.getString("text")
+                        call.respondJson(com.example.accessibility.CoSAccessibilityService.type(text).toString(2))
+                    } catch (e: Exception) {
+                        call.respondError(HttpStatusCode.BadRequest, "type requires text: ${e.message}")
+                    }
+                }
+
+                // POST /v1/ui/global — back/home/recents/notifications/quick_settings.
+                post("/v1/ui/global") {
+                    val bodyText = call.receiveText()
+                    try {
+                        val json = JSONObject(bodyText)
+                        val name = json.getString("action").lowercase()
+                        val action = when (name) {
+                            "back" -> android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK
+                            "home" -> android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME
+                            "recents" -> android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_RECENTS
+                            "notifications" -> android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS
+                            "quick_settings" -> android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS
+                            else -> { call.respondError(HttpStatusCode.BadRequest, "unknown action: $name"); return@post }
+                        }
+                        call.respondJson(com.example.accessibility.CoSAccessibilityService.global(action).toString(2))
+                    } catch (e: Exception) {
+                        call.respondError(HttpStatusCode.BadRequest, "global requires action: ${e.message}")
+                    }
+                }
+
                 // POST /v1/ota/config — set the update URL (persisted).
                 post("/v1/ota/config") {
                     val bodyText = call.receiveText()

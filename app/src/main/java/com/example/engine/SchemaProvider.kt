@@ -181,6 +181,7 @@ object SchemaProvider {
         addAction("SEND_SMS", "Sends an outgoing SMS text message", mapOf("number" to "String target phone number", "text" to "String SMS text body"), "Requires SEND_SMS permission", listOf("runtime:android.permission.SEND_SMS"), "high", "confirm_required")
         addAction("CALL", "Initiates outgoing phone dialer call", mapOf("number" to "String phone number"), "Requires CALL_PHONE permission")
         addAction("OPEN_URL", "Opens web URL in default web browser", mapOf("url" to "String web address"))
+        addAction("SEND_INTENT", "Sends a resolve-and-actuate VIEW intent to whatever app handles the scheme", mapOf("data" to "String full URI (e.g. whatsapp://send?phone=...)", "scheme" to "String scheme (e.g. whatsapp, mailto, geo, tel)", "target" to "String target for scheme://target form"))
 
         // App Control
         addAction("LAUNCH_APP", "Launches an installed Android application", mapOf("packageName" to "String package name", "activity" to "String optional target activity"))
