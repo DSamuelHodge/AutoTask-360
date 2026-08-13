@@ -311,6 +311,31 @@ class KtorLoopbackServer(
                     call.respondJson(resp.toString(2))
                 }
 
+                // GET /v1/brain/status — CoS brain health (UNIX socket).
+                get("/v1/brain/status") {
+                    val resp = JSONObject()
+                    resp.put("brain_running", com.example.wa.BrainClient.ping(context))
+                    resp.put("binary", com.example.wa.BrainService.binaryPath(context))
+                    resp.put("sock", com.example.wa.BrainService.sockPath(context))
+                    resp.put("db", com.example.wa.BrainService.dbPath(context))
+                    resp.put("last_error", com.example.wa.BrainService.lastError ?: JSONObject.NULL)
+                    call.respondJson(resp.toString(2))
+                }
+
+                // POST /v1/brain — proxy an RPC to the brain over its UNIX socket.
+                post("/v1/brain") {
+                    val bodyText = call.receiveText()
+                    try {
+                        val body = com.example.wa.BrainClient.call(context, bodyText)
+                        call.respondText(body, ContentType.Application.Json)
+                    } catch (e: Exception) {
+                        val resp = JSONObject()
+                        resp.put("ok", false)
+                        resp.put("error", "brain unreachable: ${e.message}")
+                        call.respondJson(resp.toString(2))
+                    }
+                }
+
                 // GET /v1/wa/status — WhatsApp Web bridge state.
                 get("/v1/wa/status") {
                     val resp = JSONObject()

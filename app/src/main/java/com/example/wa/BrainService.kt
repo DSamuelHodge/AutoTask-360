@@ -36,6 +36,8 @@ class BrainService : Service() {
         const val ACTION_START = "com.example.autotask.action.BRAIN_START"
         const val ACTION_STOP = "com.example.autotask.action.BRAIN_STOP"
         const val DEFAULT_PORT = 8790
+        const val PREFS = "brain_config"
+        const val KEY_TOKEN = "brain_token"
 
         @Volatile
         var isRunning: Boolean = false
@@ -72,6 +74,26 @@ class BrainService : Service() {
         fun logPath(context: Context): String {
             return File(context.getDir("brain", Context.MODE_PRIVATE), "cosd.log").absolutePath
         }
+
+        /** UNIX domain socket path for engine↔brain IPC. */
+        fun sockPath(context: Context): String {
+            return File(context.getDir("brain", Context.MODE_PRIVATE), "cosd.sock").absolutePath
+        }
+
+        /** The shared auth token (generated once, persisted in prefs). */
+        fun getToken(context: Context): String {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            prefs.getString(KEY_TOKEN, null)?.let { return it }
+            val tok = "cos-" + java.util.UUID.randomUUID().toString().replace("-", "")
+            prefs.edit().putString(KEY_TOKEN, tok).apply()
+            return tok
+        }
+
+        /** Debug: expose the brain over loopback TCP for adb forward. */
+        fun debugTcp(context: Context): Boolean {
+            return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean("debug_tcp", false)
+        }
     }
 
     private val alive = AtomicBoolean(false)
@@ -95,8 +117,9 @@ class BrainService : Service() {
         val ctx = applicationContext
         val binary = binaryPath(ctx)
         val db = dbPath(ctx)
+        val sock = sockPath(ctx)
+        val token = getToken(ctx)
         val logFile = File(logPath(ctx))
-        val err = StringBuilder()
         try {
             if (!File(binary).canExecute()) {
                 lastError = "binary not executable: $binary"
@@ -106,11 +129,19 @@ class BrainService : Service() {
             // Seed idempotently (creates DB + default contacts), then serve.
             val seed = ProcessBuilder(binary, "seed", "--db", db).start()
             seed.waitFor()
-            val p = ProcessBuilder(
+            val args = mutableListOf(
                 binary, "serve",
-                "--addr", "127.0.0.1:$DEFAULT_PORT",
-                "--db", db
-            ).redirectErrorStream(true).start()
+                "--db", db,
+                "--token", token,
+            )
+            if (debugTcp(ctx)) {
+                args += listOf("--addr", "127.0.0.1:$DEFAULT_PORT")
+            } else {
+                // Remove a stale socket file before binding.
+                File(sock).delete()
+                args += listOf("--sock", sock)
+            }
+            val p = ProcessBuilder(args).redirectErrorStream(true).start()
             process = p
             alive.set(true)
             isRunning = true
@@ -126,7 +157,6 @@ class BrainService : Service() {
             alive.set(false)
             isRunning = false
             lastError = "brain spawn failed: ${e.message}"
-            err.append(e.message)
         }
     }
 
