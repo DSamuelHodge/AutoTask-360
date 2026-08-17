@@ -38,5 +38,11 @@ class McpToolsTest {
     assertTrue(toolNames.indexOf("autotask.schedules.list") >= 0)
     assertTrue(toolNames.indexOf("autotask.schedules.get") >= 0)
     assertTrue(toolNames.indexOf("autotask.schema") < toolNames.indexOf("aware.sms"))
+    assertTrue(McpTools.byName.getValue("autotask.schema").description.contains("AutoTask 2.0"))
+    val advertised = org.json.JSONObject(com.example.engine.SchemaProvider.getSchemaJson())
+      .getJSONArray("mcpTools")
+    val advertisedNames = (0 until advertised.length()).map { advertised.getString(it) }
+    val live = McpTools.tools.map { it.name }.filter { it.startsWith("autotask.") }
+    assertEquals(live, advertisedNames)
   }
 }

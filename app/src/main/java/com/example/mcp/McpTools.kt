@@ -18,9 +18,8 @@ object McpTools {
         Tool(
             name = "autotask.schema",
             title = "AutoTask Schema",
-            description = "Return the automation trigger/action schema. Use this before creating " +
-                "or patching profiles so generated automations use supported trigger types, " +
-                "action types, parameters, and template variables.",
+            description = "Return the AutoTask 2.0 trigger/action schema, REST endpoint catalog, " +
+                "and MCP tool names. Call this before creating or patching profiles.",
             params = schema()
         ),
         Tool(

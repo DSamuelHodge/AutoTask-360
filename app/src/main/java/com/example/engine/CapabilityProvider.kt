@@ -20,7 +20,8 @@ object CapabilityProvider {
     fun getCapabilitiesJson(context: Context): String {
         val root = JSONObject()
         root.put("service", "AutoTask Tool Server Engine")
-        root.put("version", "2.0.0")
+        root.put("version", com.example.BuildConfig.VERSION_NAME)
+        root.put("versionCode", com.example.BuildConfig.VERSION_CODE)
         root.put("packageName", context.packageName)
         root.put("permissionSummary", permissionSummaryJson(context))
         root.put("declaredPermissions", declaredPermissionsJson(context))
@@ -444,12 +445,14 @@ object CapabilityProvider {
         val policy = JSONObject()
         policy.put("dryRunSupported", true)
         policy.put("defaultAutonomy", "read_only")
-        policy.put("confirmationRequiredFor", JSONArray(listOf("SEND_SMS", "CALL", "DND", "AUDIO:silent")))
+        policy.put("confirmationRequiredFor", JSONArray(listOf("SEND_SMS", "CALL", "UI_DRIVE", "HTTP", "WRITE_FILE", "CAMERA", "DND", "AUDIO:silent")))
         policy.put("safeReadEndpoints", JSONArray(listOf("/v1/status", "/v1/schema", "/v1/capabilities", "/v1/profiles", "/v1/logs", "/v1/schedules", "/v1/runs")))
-        policy.put("writeEndpoints", JSONArray(listOf("/v1/profiles", "/v1/events", "/v1/logs", "/v1/schedules/reconcile", "/v1/runs")))
+        policy.put("writeEndpoints", JSONArray(listOf("/v1/profiles", "/v1/profiles/validate", "/v1/events", "/v1/logs", "/v1/schedules/reconcile", "/v1/runs")))
         policy.put("scopes", JSONArray(listOf("READ", "PROFILE_WRITE", "EXECUTE", "UI_CONTROL", "OTA")))
         policy.put("lanRequiresPairing", true)
         policy.put("defaultBind", "127.0.0.1")
+        policy.put("productVersion", com.example.BuildConfig.VERSION_NAME)
+        policy.put("mcpProtocolVersion", "2026-07-28")
         return policy
     }
 

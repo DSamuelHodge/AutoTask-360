@@ -1,7 +1,7 @@
 # Agent Harness MCP Connection
 
-This guide connects an agentic harness running on a Mac host to the
-Sapphire-Blu MCP server running inside the Android app.
+This guide connects an agentic harness running on a Mac host to AutoTask 2.0
+(`versionName` 2.0, `versionCode` 7) running inside the Android app.
 
 This is a **local development** setup. The Ktor server binds loopback by
 default. Use `adb forward` (below). LAN bind requires an explicit paired
@@ -270,14 +270,19 @@ The same Ktor server exposes the REST control surface at:
 http://<phone-ip>:8788/v1
 ```
 
-Important authentication boundary: the implementation enforces the bearer
-token on `POST /mcp` and on non-loopback `/v1/*` requests. Requests arriving
-from phone loopback, including the app's internal brain calls and the ADB
-forward path, remain local-trust requests. Direct LAN requests must include:
+Important authentication boundary (2.0):
+
+- `POST /mcp` always requires a bearer token.
+- Loopback `/v1/*` (including `adb forward`) is local-trust in debug builds.
+- Loopback MCP accepts the internal brain token (`cos-…`).
+- LAN is off until pairing. LAN requests must use a paired `atc-…` token.
+  The brain token is rejected on LAN.
 
 ```text
-Authorization: Bearer <COS_MCP_TOKEN>
+Authorization: Bearer <paired-atc-token>
 ```
+
+Confirm the phone is on 2.0 with `GET /v1/status` → `version` is `2.0`.
 
 All request and response bodies are JSON unless noted otherwise. The normal
 error shape is `{error, code, message}`.
@@ -295,6 +300,10 @@ still return sensitive device state:
 | `GET` | `/v1/profiles` | List automation profiles. |
 | `GET` | `/v1/profiles/{id}` | Read one automation profile. |
 | `GET` | `/v1/logs?limit=N` | Read recent execution logs; default limit is 100. |
+| `GET` | `/v1/runs?limit=N` | List durable run records and statuses. |
+| `GET` | `/v1/runs/{id}` | Read one run and its step checkpoints. |
+| `GET` | `/v1/schedules` | List next-fire registrations for TIME/SCHEDULE/SUNRISE_SUNSET. |
+| `GET` | `/v1/schedules/{id}` | Read one schedule by profile id. |
 | `GET` | `/v1/brain/status` | Rust brain process, socket, database, supervisor, and health state. |
 | `GET` | `/v1/ota/status` | Installed version, update URL, and install capability. |
 | `GET` | `/v1/wa/status` | WhatsApp bridge running, pairing, error, and send state. |
@@ -321,10 +330,16 @@ still fails because of owner, calendar selection, or brain-side data mapping.
 
 | Method | Endpoint | Purpose and safety |
 |---|---|---|
+| `POST` | `/v1/profiles/validate` | Validate a definition without persisting. |
 | `POST` | `/v1/profiles` | Create or upsert a profile. Validate against `/v1/schema` first. |
 | `PATCH` | `/v1/profiles/{id}` | Partially update a profile. |
 | `DELETE` | `/v1/profiles/{id}` | Delete a profile; destructive. |
-| `POST` | `/v1/events` | Fire an event. Supports `dryRun`, `targetProfileId`, and `payload`; may execute real actions. |
+| `POST` | `/v1/events` | Fire an event. Supports `dryRun`, `profileId`, and `payload`; may execute real actions. |
+| `POST` | `/v1/runs` | Enqueue a durable run; returns `runId`. |
+| `POST` | `/v1/runs/{id}/cancel` | Cancel a queued, running, or waiting run. |
+| `POST` | `/v1/runs/{id}/retry` | Retry a terminal run. |
+| `POST` | `/v1/runs/{id}/resume` | Resume an interrupted or waiting run. |
+| `POST` | `/v1/schedules/reconcile` | Recalculate next-fire times. |
 | `DELETE` | `/v1/logs` | Clear execution logs; destructive and irreversible. |
 
 `POST /v1/events` body:
@@ -387,6 +402,16 @@ These require the CoS Screen Access accessibility service:
 Never use UI-driving endpoints for login, payment, deletion, messaging, or
 other high-impact actions without explicit user confirmation.
 
+### Pairing endpoints (loopback only)
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `POST` | `/v1/pairing/start` | Issue a 6-digit code. |
+| `POST` | `/v1/pairing/complete` | Exchange the code for an `atc-` token (shown once). |
+| `GET` | `/v1/pairing/credentials` | List hashed credentials. |
+| `POST` | `/v1/pairing/revoke` | Revoke a credential. |
+| `POST` | `/v1/pairing/lan` | `{enabled:true}` after a live credential exists. |
+
 ### OTA endpoints
 
 | Method | Endpoint | Purpose and safety |
@@ -437,11 +462,13 @@ means the HTTP bridge is reachable but the token is missing or incorrect.
 Give an agentic harness this prompt after the host tunnel and token are ready:
 
 ```text
-Connect to the Sapphire-Blu MCP server.
+Connect to AutoTask 2.0.
 
 Transport: Streamable HTTP, stateless
 URL: http://127.0.0.1:8788/mcp
-Authentication: Authorization: Bearer $COS_MCP_TOKEN
+Authentication: Authorization: Bearer $COS_MCP_TOKEN (loopback MCP / brain token)
+First REST call: GET /v1/status and confirm version is 2.0
+Then call autotask.schema and autotask.capabilities before any write.
 Protocol version: 2026-07-28
 Required request metadata:
   params._meta.io.modelcontextprotocol/protocolVersion = 2026-07-28
@@ -515,11 +542,11 @@ pairing and connection ports shown by Android.
 
 ## Direct LAN access
 
-Direct access such as `http://192.168.40.88:8788/v1/status` is supported by the
-LAN bind. Non-loopback `/v1/*` requests must include:
+Direct access such as `http://192.168.40.88:8788/v1/status` requires LAN mode
+after pairing. Non-loopback requests must include a paired client token:
 
 ```text
-Authorization: Bearer <COS_MCP_TOKEN>
+Authorization: Bearer <atc-token>
 ```
 
 The `/mcp` route always requires the bearer token. The phone firewall, Wi-Fi

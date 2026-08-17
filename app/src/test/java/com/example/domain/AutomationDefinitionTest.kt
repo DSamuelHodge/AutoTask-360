@@ -171,6 +171,16 @@ class AutomationDefinitionTest {
         assertEquals("delivery-ready", schedule.getString("state"))
         assertTrue(schedule.getJSONObject("configKeys").getString("cronExpression").contains("5-field"))
         assertFalse(schedule.getString("description").contains("cron is not implemented"))
+        assertEquals(com.example.BuildConfig.VERSION_NAME, schema.getString("version"))
+        assertEquals(com.example.BuildConfig.VERSION_CODE, schema.getInt("versionCode"))
+        val endpoints = schema.getJSONObject("endpoints")
+        listOf("status", "schema", "capabilities", "profilesValidate", "runsRequest", "schedules", "pairingStart", "mcp").forEach { key ->
+            assertTrue("missing endpoint $key", endpoints.has(key))
+        }
+        val tools = schema.getJSONArray("mcpTools")
+        val names = (0 until tools.length()).map { tools.getString(it) }
+        assertTrue(names.contains("autotask.runs.request"))
+        assertTrue(names.contains("autotask.schedules.list"))
     }
 
     @Test
