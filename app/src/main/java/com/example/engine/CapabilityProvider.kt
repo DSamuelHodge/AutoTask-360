@@ -445,8 +445,11 @@ object CapabilityProvider {
         policy.put("dryRunSupported", true)
         policy.put("defaultAutonomy", "read_only")
         policy.put("confirmationRequiredFor", JSONArray(listOf("SEND_SMS", "CALL", "DND", "AUDIO:silent")))
-        policy.put("safeReadEndpoints", JSONArray(listOf("/v1/status", "/v1/schema", "/v1/capabilities", "/v1/profiles", "/v1/logs")))
-        policy.put("writeEndpoints", JSONArray(listOf("/v1/profiles", "/v1/events", "/v1/logs")))
+        policy.put("safeReadEndpoints", JSONArray(listOf("/v1/status", "/v1/schema", "/v1/capabilities", "/v1/profiles", "/v1/logs", "/v1/schedules", "/v1/runs")))
+        policy.put("writeEndpoints", JSONArray(listOf("/v1/profiles", "/v1/events", "/v1/logs", "/v1/schedules/reconcile", "/v1/runs")))
+        policy.put("scopes", JSONArray(listOf("READ", "PROFILE_WRITE", "EXECUTE", "UI_CONTROL", "OTA")))
+        policy.put("lanRequiresPairing", true)
+        policy.put("defaultBind", "127.0.0.1")
         return policy
     }
 

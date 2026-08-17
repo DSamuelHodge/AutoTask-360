@@ -10,7 +10,7 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
-import com.example.engine.AutoTaskEngine
+import com.example.application.AutomationCommandFacade
 import com.example.server.KtorLoopbackServer
 import com.example.server.KtorServerConfig
 
@@ -60,7 +60,7 @@ class AutoTaskService : Service() {
     private val binder = LocalBinder()
     private var ktorServer: KtorLoopbackServer? = null
     private var receivers: SystemEventReceivers? = null
-    private lateinit var engine: AutoTaskEngine
+    private lateinit var commands: AutomationCommandFacade
 
     inner class LocalBinder : Binder() {
         fun getService(): AutoTaskService = this@AutoTaskService
@@ -69,7 +69,7 @@ class AutoTaskService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        engine = AutoTaskEngine.getInstance(this)
+        commands = AutomationCommandFacade.getInstance(this)
 
         startKtorServer()
 
@@ -94,7 +94,7 @@ class AutoTaskService : Service() {
         val notification = createServiceNotification()
         startForeground(NOTIFICATION_ID, notification)
         isForegroundActive = true
-        engine.setRunningState(true)
+        commands.setRunningState(true)
 
         return START_STICKY
     }
@@ -106,7 +106,7 @@ class AutoTaskService : Service() {
         receivers?.unregister()
         ktorServer?.stop()
         KtorServerConfig.markStopped(this)
-        engine.setRunningState(false)
+        commands.setRunningState(false)
         isForegroundActive = false
         super.onDestroy()
     }

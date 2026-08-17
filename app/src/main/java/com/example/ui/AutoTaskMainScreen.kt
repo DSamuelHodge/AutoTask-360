@@ -1261,7 +1261,7 @@ private fun EventsTab(
         )
 
         Text(
-            text = "Simulate broadcast events or fire manual triggers directly into AutoTaskEngine for all 44 trigger types:",
+            text = "Simulate broadcast events or fire manual triggers directly into the automation runtime for all 44 trigger types:",
             fontSize = 10.sp,
             color = HighDensityOnSurfaceVariant
         )
@@ -1490,6 +1490,7 @@ private fun StatusTab(
 
                     Text("Service Status: ${if (isServiceRunning) "Active (Foreground)" else "Stopped"}", fontSize = 10.sp)
                     Text("Ktor HTTP Server: ${if (serverConfig.isRunning) "Running" else "Stopped"}", fontSize = 10.sp)
+                    Text("Bind: ${serverConfig.host} • LAN ${if (serverConfig.lanEnabled) "on" else "off"}", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                     Text("Listener Port: ${serverConfig.listenerPort} reserved", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                     Text("ContentProvider: content://com.example.autotask.provider", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                     Text("Last Result: ${serverConfig.lastResult}", fontSize = 10.sp)

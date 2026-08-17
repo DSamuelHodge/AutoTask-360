@@ -4,10 +4,9 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.application.AutomationCommandFacade
 import com.example.data.AutomationProfile
-import com.example.data.AutoTaskRepository
 import com.example.data.ExecutionLog
-import com.example.engine.AutoTaskEngine
 import com.example.engine.AutomationEvent
 import com.example.server.KtorServerConfig
 import com.example.server.KtorServerSnapshot
@@ -30,17 +29,16 @@ import java.util.concurrent.TimeUnit
 
 class AutoTaskViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository = AutoTaskRepository(application)
-    private val engine = AutoTaskEngine.getInstance(application)
+    private val commands = AutomationCommandFacade.getInstance(application)
 
-    val profiles: StateFlow<List<AutomationProfile>> = repository.allProfilesFlow
+    val profiles: StateFlow<List<AutomationProfile>> = commands.profilesFlow
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList()
         )
 
-    val logs: StateFlow<List<ExecutionLog>> = repository.logsFlow
+    val logs: StateFlow<List<ExecutionLog>> = commands.logsFlow
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -69,7 +67,7 @@ class AutoTaskViewModel(application: Application) : AndroidViewModel(application
     init {
         // Ensure default recipes exist on startup
         viewModelScope.launch {
-            repository.seedDefaultRecipesIfNeeded()
+            commands.seedDefaults()
             AutoTaskService.startService(application)
             refreshRuntimeStatus()
         }
@@ -86,11 +84,11 @@ class AutoTaskViewModel(application: Application) : AndroidViewModel(application
         val app = getApplication<Application>()
         if (enable) {
             AutoTaskService.startService(app)
-            engine.setRunningState(true)
+            commands.setRunningState(true)
             refreshRuntimeStatus()
         } else {
             AutoTaskService.stopService(app)
-            engine.setRunningState(false)
+            commands.setRunningState(false)
             refreshRuntimeStatus()
         }
     }
@@ -118,7 +116,7 @@ class AutoTaskViewModel(application: Application) : AndroidViewModel(application
         }
 
         AutoTaskService.restartKtorServer(app)
-        _apiTestResponse.value = "Ktor server restart requested for ${KtorServerConfig.HOST}:$port."
+        _apiTestResponse.value = "Ktor server restart requested for ${KtorServerConfig.bindHost(app)}:$port."
         refreshRuntimeStatus()
     }
 
@@ -126,7 +124,23 @@ class AutoTaskViewModel(application: Application) : AndroidViewModel(application
         val app = getApplication<Application>()
         KtorServerConfig.reset(app)
         AutoTaskService.restartKtorServer(app)
-        _apiTestResponse.value = "Ktor server reset to ${KtorServerConfig.HOST}:${KtorServerConfig.DEFAULT_PORT}."
+        _apiTestResponse.value = "Ktor server reset to ${KtorServerConfig.bindHost(app)}:${KtorServerConfig.DEFAULT_PORT}."
+        refreshRuntimeStatus()
+    }
+
+    fun setLanEnabled(enabled: Boolean) {
+        val app = getApplication<Application>()
+        try {
+            com.example.security.ExternalAccess.getInstance(app).setLanEnabled(enabled)
+            AutoTaskService.restartKtorServer(app)
+            _apiTestResponse.value = if (enabled) {
+                "LAN bind enabled at ${KtorServerConfig.bindHost(app)}."
+            } else {
+                "LAN bind disabled; server is loopback-only."
+            }
+        } catch (e: com.example.security.PairingRequiredException) {
+            _apiTestResponse.value = e.message ?: "Pair a credential before enabling LAN."
+        }
         refreshRuntimeStatus()
     }
 
@@ -139,19 +153,19 @@ class AutoTaskViewModel(application: Application) : AndroidViewModel(application
 
     fun toggleProfileEnabled(profileId: String, currentEnabled: Boolean) {
         viewModelScope.launch {
-            repository.setProfileEnabled(profileId, !currentEnabled)
+            commands.setProfileEnabled(profileId, !currentEnabled)
         }
     }
 
     fun upsertProfile(profile: AutomationProfile) {
         viewModelScope.launch {
-            repository.upsertProfile(profile)
+            commands.upsertProfile(profile)
         }
     }
 
     fun deleteProfile(profileId: String) {
         viewModelScope.launch {
-            repository.deleteProfileById(profileId)
+            commands.deleteProfile(profileId)
         }
     }
 
@@ -161,13 +175,13 @@ class AutoTaskViewModel(application: Application) : AndroidViewModel(application
             if (!profileId.isNull_or_Empty()) {
                 payload["profileId"] = profileId
             }
-            engine.processEvent(AutomationEvent(type = "MANUAL", payload = payload))
+            commands.processEvent(AutomationEvent(type = "MANUAL", payload = payload))
         }
     }
 
     fun clearLogs() {
         viewModelScope.launch {
-            repository.clearLogs()
+            commands.clearLogs()
         }
     }
 
@@ -220,7 +234,7 @@ class AutoTaskViewModel(application: Application) : AndroidViewModel(application
 
     private fun refreshRuntimeStatus() {
         _ktorServerConfig.value = KtorServerConfig.getSnapshot(getApplication())
-        _isServiceRunning.value = AutoTaskService.isForegroundActive && engine.isRunning
+        _isServiceRunning.value = AutoTaskService.isForegroundActive && commands.isRunning
     }
 }
 

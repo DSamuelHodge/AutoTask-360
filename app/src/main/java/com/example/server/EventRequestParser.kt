@@ -6,7 +6,13 @@ data class ParsedEventRequest(
     val triggerType: String,
     val payload: Map<String, Any?>,
     val targetProfileId: String?,
-    val dryRun: Boolean
+    val dryRun: Boolean,
+    val eventId: String? = null,
+    val source: String = "api",
+    val occurredAt: Long? = null,
+    val dedupeKey: String? = null,
+    val correlationId: String? = null,
+    val idempotencyKey: String? = null
 )
 
 object EventRequestParser {
@@ -33,11 +39,26 @@ object EventRequestParser {
             payloadMap["profileId"] = targetProfileId
         }
 
+        val occurredAt = when {
+            json.has("occurredAt") -> json.optLong("occurredAt")
+            json.has("occurred_at") -> json.optLong("occurred_at")
+            else -> null
+        }
+
         return ParsedEventRequest(
             triggerType = triggerType,
             payload = payloadMap,
             targetProfileId = targetProfileId,
-            dryRun = json.optBoolean("dryRun", json.optBoolean("dry_run", false))
+            dryRun = json.optBoolean("dryRun", json.optBoolean("dry_run", false)),
+            eventId = firstNonBlank(json.optString("eventId", ""), json.optString("event_id", "")),
+            source = firstNonBlank(json.optString("source", "")) ?: "api",
+            occurredAt = occurredAt,
+            dedupeKey = firstNonBlank(json.optString("dedupeKey", ""), json.optString("dedupe_key", "")),
+            correlationId = firstNonBlank(json.optString("correlationId", ""), json.optString("correlation_id", "")),
+            idempotencyKey = firstNonBlank(
+                json.optString("idempotencyKey", ""),
+                json.optString("idempotency_key", "")
+            )
         )
     }
 

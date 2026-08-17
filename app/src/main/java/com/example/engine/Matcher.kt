@@ -241,6 +241,31 @@ object Matcher {
                         val actMin = (payload["minute"] as? Number)?.toInt() ?: -1
                         if (actMin != -1 && actMin != reqMin) return "config_mismatch"
                     }
+                    if (json.has("days")) {
+                        val days = json.optJSONArray("days")
+                        val actual = payload["day"]?.toString()?.uppercase() ?: ""
+                        if (actual.isNotEmpty() && days != null) {
+                            val allowed = (0 until days.length()).map { days.getString(it).uppercase() }
+                            if (actual !in allowed) return "config_mismatch"
+                        }
+                    }
+                }
+                "SCHEDULE" -> {
+                    val target = payload["profileId"]?.toString().orEmpty()
+                    if (target.isNotEmpty() && json.has("profileId") &&
+                        !target.equals(json.optString("profileId"), ignoreCase = true)
+                    ) {
+                        return "config_mismatch"
+                    }
+                }
+                "SUNRISE_SUNSET" -> {
+                    if (json.has("event")) {
+                        val req = json.getString("event")
+                        val actual = payload["event"]?.toString() ?: ""
+                        if (actual.isNotEmpty() && !actual.equals(req, ignoreCase = true)) {
+                            return "config_mismatch"
+                        }
+                    }
                 }
                 "CUSTOM_INTENT" -> {
                     if (json.has("action")) {

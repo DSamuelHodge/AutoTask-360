@@ -10,6 +10,7 @@ class AutoTaskRepository(context: Context) {
     private val db = AutoTaskDatabase.getInstance(context)
     val profileDao = db.profileDao()
     val logDao = db.logDao()
+    var onProfileMutated: (suspend (String) -> Unit)? = null
 
     val allProfilesFlow: Flow<List<AutomationProfile>> = profileDao.getAllProfilesFlow()
     val logsFlow: Flow<List<ExecutionLog>> = logDao.getLogsFlow(100)
@@ -26,23 +27,26 @@ class AutoTaskRepository(context: Context) {
 
     suspend fun upsertProfile(profile: AutomationProfile) {
         profileDao.upsertProfile(profile)
+        onProfileMutated?.invoke(profile.id)
     }
 
     suspend fun updateProfile(profile: AutomationProfile) {
         profileDao.updateProfile(profile)
+        onProfileMutated?.invoke(profile.id)
     }
 
     suspend fun setProfileEnabled(id: String, isEnabled: Boolean) {
         profileDao.setProfileEnabled(id, isEnabled)
+        onProfileMutated?.invoke(id)
     }
 
     suspend fun deleteProfileById(id: String): Boolean {
-        return profileDao.deleteProfileById(id) > 0
+        val deleted = profileDao.deleteProfileById(id) > 0
+        if (deleted) onProfileMutated?.invoke(id)
+        return deleted
     }
 
-    suspend fun clearLogs() {
-        logDao.clearLogs()
-    }
+    suspend fun clearLogs(): Int = logDao.clearLogs()
 
     suspend fun insertLog(log: ExecutionLog): Long {
         return logDao.insertLog(log)
@@ -51,12 +55,16 @@ class AutoTaskRepository(context: Context) {
     suspend fun getStatusMap(): Map<String, Any> {
         val profileCount = profileDao.getProfileCount()
         val logCount = logDao.getLogCount()
+        val incompleteRunCount = db.runDao().incompleteRunCount()
+        val scheduledCount = db.scheduleDao().scheduledCount()
         val serverConfig = KtorServerConfig.getSnapshot(appContext)
         val permissionSummary = CapabilityProvider.permissionSummary(appContext)
         return mapOf(
             "engine_running" to 1,
             "profile_count" to profileCount,
             "log_count" to logCount,
+            "incomplete_run_count" to incompleteRunCount,
+            "scheduled_count" to scheduledCount,
             "relay_target" to serverConfig.baseUrl,
             "ktor_server_enabled" to serverConfig.enabled,
             "ktor_server_host" to serverConfig.host,
@@ -72,7 +80,7 @@ class AutoTaskRepository(context: Context) {
             "dnd_ready" to (permissionSummary["dnd_ready"] ?: false),
             "device_settings_ready" to (permissionSummary["device_settings_ready"] ?: false),
             "provider_uri" to "content://com.example.autotask.provider",
-            "version" to "1.0.0"
+            "version" to com.example.BuildConfig.VERSION_NAME
         )
     }
 

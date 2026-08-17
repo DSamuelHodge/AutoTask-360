@@ -36,6 +36,7 @@ class BrainService : Service() {
         const val ACTION_START = "com.example.autotask.action.BRAIN_START"
         const val ACTION_STOP = "com.example.autotask.action.BRAIN_STOP"
         const val DEFAULT_PORT = 8790
+        const val BRAIN_DATABASE_NAME = "cos.db"
         const val PREFS = "brain_config"
         const val KEY_TOKEN = "brain_token"
 
@@ -83,7 +84,7 @@ class BrainService : Service() {
 
         /** Writable DB location (app-private). */
         fun dbPath(context: Context): String {
-            return File(context.getDir("brain", Context.MODE_PRIVATE), "cos.db").absolutePath
+            return File(context.getDir("brain", Context.MODE_PRIVATE), BRAIN_DATABASE_NAME).absolutePath
         }
 
         /** Log file for the daemon's stdout/stderr. */
@@ -99,6 +100,27 @@ class BrainService : Service() {
         /** PID file guard against double-spawn. */
         fun pidFile(context: Context): String {
             return File(context.getDir("brain", Context.MODE_PRIVATE), "cosd.pid").absolutePath
+        }
+
+        /**
+         * Extract the bundled Mozilla CA bundle (`res/raw/cacert.pem`) into the
+         * app-private brain dir, so the Rust daemon's rustls client (which reads
+         * `SSL_CERT_FILE` via openssl-probe) can verify Turso's TLS certificate.
+         * Returns null if extraction failed or the resource is unavailable.
+         */
+        fun extractCaBundle(context: Context): File? {
+            return try {
+                val dir = context.getDir("brain", Context.MODE_PRIVATE)
+                val out = File(dir, "cacert.pem")
+                if (!out.exists() || out.length() == 0L) {
+                    context.resources.openRawResource(com.example.R.raw.cacert).use { input ->
+                        out.outputStream().use { input.copyTo(it) }
+                    }
+                }
+                if (out.exists() && out.length() > 0L) out else null
+            } catch (e: Exception) {
+                null
+            }
         }
 
         /** The shared auth token (generated once, persisted in prefs). */
@@ -210,15 +232,46 @@ class BrainService : Service() {
         val token = getToken(ctx)
         val logFile = File(logPath(ctx))
         val pid = File(pidFile(ctx))
+        // Turso cloud sync: when configured, hand the credentials to the
+        // daemon via env vars so it opens an embedded replica.
+        val tursoEnv = mutableMapOf<String, String>()
+        if (TursoConfig.isConfigured(ctx)) {
+            tursoEnv["TURSO_URL"] = TursoConfig.getUrl(ctx)
+            tursoEnv["TURSO_TOKEN"] = TursoConfig.getToken(ctx)
+            // The libsql Rust client uses rustls-native-certs, which on Android
+            // finds no CA store. Point it at a bundled Mozilla CA bundle.
+            val caFile = extractCaBundle(ctx)
+            if (caFile != null) {
+                tursoEnv["SSL_CERT_FILE"] = caFile.absolutePath
+            }
+        }
         try {
             if (!File(binary).canExecute()) {
                 lastError = "binary not executable: $binary"
                 isRunning = false
                 return false
             }
-            // Seed idempotently (creates DB + default contacts), then serve.
-            val seed = ProcessBuilder(binary, "seed", "--db", db).start()
-            seed.waitFor()
+            // When Turso cloud sync is on, the cloud DB is the source of
+            // truth: skip local seeding (which would create a plain file that
+            // the embedded replica can't adopt) and remove any stale local
+            // replica files so the daemon can resync fresh from the cloud.
+            val tursoOn = tursoEnv.isNotEmpty()
+            if (tursoOn) {
+                for (f in listOf(
+                    BRAIN_DATABASE_NAME,
+                    "$BRAIN_DATABASE_NAME-wal",
+                    "$BRAIN_DATABASE_NAME-shm",
+                    "$BRAIN_DATABASE_NAME-info"
+                )) {
+                    File(File(db).parentFile, f).delete()
+                }
+            } else {
+                // Seed idempotently (creates DB + default contacts), then serve.
+                val seed = ProcessBuilder(binary, "seed", "--db", db)
+                    .also { it.environment().putAll(tursoEnv) }
+                    .start()
+                seed.waitFor()
+            }
             val args = mutableListOf(
                 binary, "serve",
                 "--db", db,
@@ -231,7 +284,10 @@ class BrainService : Service() {
                 File(sock).delete()
                 args += listOf("--sock", sock)
             }
-            val p = ProcessBuilder(args).redirectErrorStream(true).start()
+            val p = ProcessBuilder(args)
+                .also { it.environment().putAll(tursoEnv) }
+                .redirectErrorStream(true)
+                .start()
             process = p
             pid.writeText(processPid(p).toString())
             isRunning = true

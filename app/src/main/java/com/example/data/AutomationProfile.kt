@@ -1,5 +1,6 @@
 package com.example.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -17,5 +18,9 @@ data class AutomationProfile(
     val priority: Int = 0,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
-    val lastTriggeredAt: Long = 0L
+    val lastTriggeredAt: Long = 0L,
+    @ColumnInfo(defaultValue = "1")
+    val schemaVersion: Int = 1,
+    @ColumnInfo(defaultValue = "1")
+    val revision: Long = 1L
 )

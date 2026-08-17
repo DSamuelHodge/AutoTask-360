@@ -32,4 +32,11 @@ class KtorServerConfigTest {
     assertEquals(true, KtorServerConfig.isLoopbackHost("::1"))
     assertEquals(false, KtorServerConfig.isLoopbackHost("192.168.40.88"))
   }
+
+  @Test
+  fun defaultBindIsLoopbackNotLan() {
+    assertEquals("127.0.0.1", KtorServerConfig.HOST)
+    assertEquals("127.0.0.1", KtorServerConfig.LOOPBACK_HOST)
+    assertEquals("0.0.0.0", KtorServerConfig.LAN_HOST)
+  }
 }

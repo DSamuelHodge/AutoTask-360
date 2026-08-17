@@ -2,7 +2,7 @@ package com.example.service
 
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import com.example.engine.AutoTaskEngine
+import com.example.application.AutomationCommandFacade
 import com.example.engine.AutomationEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,8 +26,8 @@ class AutoTaskNotificationListener : NotificationListenerService() {
         if (title.isBlank() && text.isBlank()) return
 
         scope.launch {
-            val engine = AutoTaskEngine.getInstance(applicationContext)
-            engine.processEvent(
+            val commands = AutomationCommandFacade.getInstance(applicationContext)
+            commands.processEvent(
                 AutomationEvent(
                     type = "NOTIFICATION",
                     payload = mapOf(

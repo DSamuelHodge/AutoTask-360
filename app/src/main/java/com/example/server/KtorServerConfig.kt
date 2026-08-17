@@ -9,16 +9,18 @@ data class KtorServerSnapshot(
     val listenerPort: Int,
     val isRunning: Boolean,
     val lastError: String,
-    val lastResult: String
+    val lastResult: String,
+    val lanEnabled: Boolean = false
 ) {
     val baseUrl: String = "http://$host:$port"
 }
 
 object KtorServerConfig {
-    // Bind on all interfaces so a paired development harness can use the
-    // phone's LAN address. Non-loopback REST requests are bearer-authenticated
-    // by KtorLoopbackServer; the MCP route has its own auth check.
-    const val HOST = "0.0.0.0"
+    // Default bind is loopback. LAN bind (0.0.0.0) is only used after the
+    // user pairs a credential and explicitly enables LAN mode.
+    const val HOST = "127.0.0.1"
+    const val LOOPBACK_HOST = "127.0.0.1"
+    const val LAN_HOST = "0.0.0.0"
     const val LOCAL_CLIENT_HOST = "127.0.0.1"
     const val DEFAULT_PORT = 8788
     const val LISTENER_PORT = 8787
@@ -33,17 +35,22 @@ object KtorServerConfig {
     private const val KEY_LAST_ERROR = "ktor_server_last_error"
     private const val KEY_LAST_RESULT = "ktor_server_last_result"
 
+    fun bindHost(context: Context): String =
+        if (com.example.security.ExternalAccess.getInstance(context).isLanEnabled()) LAN_HOST else LOOPBACK_HOST
+
     fun getSnapshot(context: Context): KtorServerSnapshot {
         val prefs = prefs(context)
         val port = readValidatedPort(context)
+        val lanEnabled = com.example.security.ExternalAccess.getInstance(context).isLanEnabled()
         return KtorServerSnapshot(
             enabled = prefs.getBoolean(KEY_ENABLED, true),
-            host = HOST,
+            host = if (lanEnabled) LAN_HOST else LOOPBACK_HOST,
             port = port,
             listenerPort = LISTENER_PORT,
             isRunning = prefs.getBoolean(KEY_RUNNING, false),
             lastError = prefs.getString(KEY_LAST_ERROR, "") ?: "",
-            lastResult = prefs.getString(KEY_LAST_RESULT, "Not started") ?: "Not started"
+            lastResult = prefs.getString(KEY_LAST_RESULT, "Not started") ?: "Not started",
+            lanEnabled = lanEnabled
         )
     }
 
@@ -80,7 +87,7 @@ object KtorServerConfig {
         prefs(context).edit()
             .putBoolean(KEY_RUNNING, true)
             .putString(KEY_LAST_ERROR, "")
-            .putString(KEY_LAST_RESULT, "Running at $HOST:$port")
+            .putString(KEY_LAST_RESULT, "Running at ${bindHost(context)}:$port")
             .apply()
     }
 

@@ -1,11 +1,18 @@
 package com.example.server
 
 import android.content.Context
-import com.example.data.AutomationProfile
-import com.example.engine.AutoTaskEngine
-import com.example.engine.AutomationEvent
-import com.example.engine.CapabilityProvider
-import com.example.engine.SchemaProvider
+import com.example.application.AutomationCommandFacade
+import com.example.application.ProfileNotFoundException
+import com.example.domain.RunNotFoundException
+import com.example.domain.ScheduleNotFoundException
+import com.example.security.AccessDeniedException
+import com.example.security.AccessOperation
+import com.example.security.AccessScope
+import com.example.security.ApprovalRequiredException
+import com.example.security.CommandContext
+import com.example.security.ExternalAccess
+import com.example.security.PairingException
+import com.example.security.PairingRequiredException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
@@ -35,28 +42,122 @@ class KtorLoopbackServer(
     private val port: Int = 8788
 ) {
     private var serverEngine: EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? = null
-    private val autoTaskEngine = AutoTaskEngine.getInstance(context)
+    private val commands = AutomationCommandFacade.getInstance(context)
+    private val access = ExternalAccess.getInstance(context)
 
     fun start() {
         if (serverEngine != null) return
 
-        serverEngine = embeddedServer(CIO, host = KtorServerConfig.HOST, port = port) {
+        serverEngine = embeddedServer(CIO, host = KtorServerConfig.bindHost(context), port = port) {
             intercept(ApplicationCallPipeline.Plugins) {
-                val path = call.request.path()
-                if (path.startsWith("/v1/") && !KtorServerConfig.isLoopbackHost(call.request.local.remoteHost)) {
-                    val expected = "Bearer ${com.example.wa.BrainService.getToken(this@KtorLoopbackServer.context)}"
-                    if (call.request.headers["Authorization"] != expected) {
-                        call.respondError(HttpStatusCode.Unauthorized, "Unauthorized: missing or invalid Bearer token")
-                        finish()
-                    }
+                if (!HttpSecurity.gate(call, access)) {
+                    finish()
                 }
             }
             routing {
+                post("/v1/pairing/start") {
+                    val challenge = access.startPairing()
+                    val body = JSONObject()
+                        .put("status", "OK")
+                        .put("code", challenge.code)
+                        .put("expiresAt", challenge.expiresAt)
+                    call.respondJson(body.toString(2))
+                }
+
+                post("/v1/pairing/complete") {
+                    val bodyText = call.receiveText()
+                    try {
+                        val json = if (bodyText.isBlank()) JSONObject() else JSONObject(bodyText)
+                        val scopes = linkedSetOf<AccessScope>()
+                        val scopeArr = json.optJSONArray("scopes")
+                        if (scopeArr != null) {
+                            for (i in 0 until scopeArr.length()) {
+                                AccessScope.parse(scopeArr.optString(i))?.let { scopes += it }
+                            }
+                        }
+                        val actions = linkedSetOf<String>()
+                        val actionArr = json.optJSONArray("approvedActions")
+                        if (actionArr != null) {
+                            for (i in 0 until actionArr.length()) actions += actionArr.optString(i)
+                        }
+                        val issued = access.completePairing(
+                            code = json.optString("code"),
+                            name = json.optString("name", "paired-client"),
+                            scopes = scopes,
+                            approvedActions = actions
+                        )
+                        val body = JSONObject()
+                            .put("status", "OK")
+                            .put("credentialId", issued.credential.id)
+                            .put("name", issued.credential.name)
+                            .put("token", issued.token)
+                            .put("scopes", JSONArray(issued.credential.scopes.map { it.name }))
+                            .put("approvedActions", JSONArray(issued.credential.approvedActions.toList()))
+                        call.respondJson(body.toString(2), HttpStatusCode.Created)
+                    } catch (e: PairingException) {
+                        call.respondError(HttpStatusCode.BadRequest, e.message ?: "Pairing failed")
+                    }
+                }
+
+                get("/v1/pairing/credentials") {
+                    val arr = JSONArray()
+                    access.pairing.list().forEach { cred ->
+                        arr.put(
+                            JSONObject()
+                                .put("id", cred.id)
+                                .put("name", cred.name)
+                                .put("scopes", JSONArray(cred.scopes.map { it.name }))
+                                .put("approvedActions", JSONArray(cred.approvedActions.toList()))
+                                .put("createdAt", cred.createdAt)
+                                .put("lastUsedAt", cred.lastUsedAt)
+                                .put("revoked", cred.revoked)
+                        )
+                    }
+                    call.respondJson(JSONObject().put("credentials", arr).put("count", arr.length()).toString(2))
+                }
+
+                post("/v1/pairing/revoke") {
+                    val bodyText = call.receiveText()
+                    val id = try {
+                        JSONObject(bodyText).optString("id")
+                    } catch (_: Exception) {
+                        ""
+                    }
+                    if (id.isBlank()) {
+                        call.respondError(HttpStatusCode.BadRequest, "id is required")
+                    } else {
+                        val revoked = access.pairing.revoke(id)
+                        if (!revoked) call.respondError(HttpStatusCode.NotFound, "Credential not found")
+                        else call.respondJson(JSONObject().put("status", "OK").put("revoked", id).toString(2))
+                    }
+                }
+
+                post("/v1/pairing/lan") {
+                    val bodyText = call.receiveText()
+                    val enabled = try {
+                        JSONObject(bodyText).optBoolean("enabled", false)
+                    } catch (_: Exception) {
+                        false
+                    }
+                    try {
+                        access.setLanEnabled(enabled)
+                        call.respondJson(
+                            JSONObject()
+                                .put("status", "OK")
+                                .put("lanEnabled", access.isLanEnabled())
+                                .put("bindHost", KtorServerConfig.bindHost(context))
+                                .toString(2)
+                        )
+                    } catch (_: PairingRequiredException) {
+                        call.respondError(HttpStatusCode.Forbidden, "LAN access requires at least one active paired credential")
+                    }
+                }
+
                 // GET /v1/status
                 get("/v1/status") {
-                    val statusMap = autoTaskEngine.repository.getStatusMap()
+                    val statusMap = commands.statusMap()
                     val json = JSONObject()
-                    json.put("engine_running", if (autoTaskEngine.isRunning) 1 else 0)
+                    json.put("engine_running", if (commands.isRunning) 1 else 0)
                     json.put("profile_count", statusMap["profile_count"])
                     json.put("log_count", statusMap["log_count"])
                     json.put("relay_target", "http://127.0.0.1:$port")
@@ -74,35 +175,35 @@ class KtorLoopbackServer(
                     json.put("dnd_ready", statusMap["dnd_ready"])
                     json.put("device_settings_ready", statusMap["device_settings_ready"])
                     val ready = JSONObject()
-                    ready.put("api", autoTaskEngine.isRunning && statusMap["ktor_server_running"] == true)
+                    ready.put("api", commands.isRunning && statusMap["ktor_server_running"] == true)
                     ready.put("permissions", statusMap["dnd_ready"] == true && statusMap["device_settings_ready"] == true)
                     ready.put("dnd", statusMap["dnd_ready"])
                     ready.put("device_settings", statusMap["device_settings_ready"])
                     ready.put("notification_listener", statusMap["notification_listener_enabled"])
                     json.put("ready", ready)
                     json.put("provider_uri", "content://com.example.autotask.provider")
-                    json.put("uptime_ms", autoTaskEngine.getUptimeMs())
-                    json.put("version", "1.0.0")
+                    json.put("uptime_ms", commands.uptimeMs())
+                    json.put("version", com.example.BuildConfig.VERSION_NAME)
 
                     call.respondJson(json.toString(2))
                 }
 
                 // GET /v1/schema
                 get("/v1/schema") {
-                    call.respondJson(SchemaProvider.getSchemaJson())
+                    call.respondJson(commands.schemaJson())
                 }
 
                 // GET /v1/capabilities
                 get("/v1/capabilities") {
-                    call.respondJson(CapabilityProvider.getCapabilitiesJson(context))
+                    call.respondJson(commands.capabilitiesJson())
                 }
 
                 // GET /v1/profiles
                 get("/v1/profiles") {
-                    val profiles = autoTaskEngine.repository.profileDao.getAllProfiles()
+                    val profiles = commands.listProfiles()
                     val arr = JSONArray()
                     profiles.forEach { p ->
-                        arr.put(profileToJson(p))
+                        arr.put(AutomationCommandFacade.profileToJson(p))
                     }
                     call.respondJson(arr.toString(2))
                 }
@@ -110,11 +211,26 @@ class KtorLoopbackServer(
                 // GET /v1/profiles/{id}
                 get("/v1/profiles/{id}") {
                     val id = call.parameters["id"] ?: ""
-                    val p = autoTaskEngine.repository.getProfileById(id)
+                    val p = commands.getProfile(id)
                     if (p != null) {
-                        call.respondJson(profileToJson(p).toString(2))
+                        call.respondJson(AutomationCommandFacade.profileToJson(p).toString(2))
                     } else {
                         call.respondError(HttpStatusCode.NotFound, "Profile not found: $id")
+                    }
+                }
+
+                // POST /v1/profiles/validate
+                post("/v1/profiles/validate") {
+                    val bodyText = call.receiveText()
+                    try {
+                        val definition = commands.validateAutomation(JSONObject(bodyText))
+                        val resp = JSONObject()
+                            .put("status", "OK")
+                            .put("valid", true)
+                            .put("definition", AutomationCommandFacade.definitionToJson(definition))
+                        call.respondJson(resp.toString(2))
+                    } catch (e: Exception) {
+                        call.respondError(HttpStatusCode.BadRequest, "Invalid automation: ${e.localizedMessage}")
                     }
                 }
 
@@ -122,47 +238,12 @@ class KtorLoopbackServer(
                 post("/v1/profiles") {
                     val bodyText = call.receiveText()
                     try {
-                        val json = JSONObject(bodyText)
-                        val id = json.optString("id", "")
-                        val name = json.optString("name", "")
-                        val triggerType = json.optString("triggerType", "")
-
-                        // Input validation
-                        if (id.isBlank()) {
-                            call.respondError(HttpStatusCode.BadRequest, "Field 'id' is required")
-                            return@post
-                        }
-                        if (name.isBlank()) {
-                            call.respondError(HttpStatusCode.BadRequest, "Field 'name' is required")
-                            return@post
-                        }
-                        if (triggerType.isBlank()) {
-                            call.respondError(HttpStatusCode.BadRequest, "Field 'triggerType' is required")
-                            return@post
-                        }
-
-                        val now = System.currentTimeMillis()
-                        val profile = AutomationProfile(
-                            id = id,
-                            name = name,
-                            description = json.optString("description", ""),
-                            isEnabled = json.optBoolean("isEnabled", false),
-                            triggerType = triggerType.uppercase(),
-                            triggerConfigJson = json.opt("triggerConfigJson")?.toString() ?: "{}",
-                            conditionsJson = json.opt("conditionsJson")?.toString() ?: "{}",
-                            actionsJson = json.opt("actionsJson")?.toString() ?: "[]",
-                            cooldownMs = json.optLong("cooldownMs", 0L),
-                            priority = json.optInt("priority", 0),
-                            createdAt = json.optLong("createdAt", now),
-                            updatedAt = now
-                        )
-
-                        autoTaskEngine.repository.upsertProfile(profile)
+                        val profile = commands.upsertProfile(JSONObject(bodyText))
 
                         val resp = JSONObject()
                         resp.put("status", "OK")
                         resp.put("message", "Profile upserted successfully")
-                        resp.put("profile", profileToJson(profile))
+                        resp.put("profile", AutomationCommandFacade.profileToJson(profile))
                         call.respondJson(resp.toString(2), HttpStatusCode.Created)
                     } catch (e: Exception) {
                         call.respondError(HttpStatusCode.BadRequest, "Invalid JSON body: ${e.localizedMessage}")
@@ -173,34 +254,16 @@ class KtorLoopbackServer(
                 patch("/v1/profiles/{id}") {
                     val id = call.parameters["id"] ?: ""
                     val bodyText = call.receiveText()
-                    val existing = autoTaskEngine.repository.getProfileById(id)
-                    if (existing == null) {
-                        call.respondError(HttpStatusCode.NotFound, "Profile not found: $id")
-                        return@patch
-                    }
-
                     try {
-                        val json = JSONObject(bodyText)
-                        val updated = existing.copy(
-                            name = if (json.has("name")) json.getString("name") else existing.name,
-                            description = if (json.has("description")) json.getString("description") else existing.description,
-                            isEnabled = if (json.has("isEnabled")) json.getBoolean("isEnabled") else existing.isEnabled,
-                            triggerType = if (json.has("triggerType")) json.getString("triggerType").uppercase() else existing.triggerType,
-                            triggerConfigJson = if (json.has("triggerConfigJson")) json.opt("triggerConfigJson")?.toString() ?: "{}" else existing.triggerConfigJson,
-                            conditionsJson = if (json.has("conditionsJson")) json.opt("conditionsJson")?.toString() ?: "{}" else existing.conditionsJson,
-                            actionsJson = if (json.has("actionsJson")) json.opt("actionsJson")?.toString() ?: "[]" else existing.actionsJson,
-                            cooldownMs = if (json.has("cooldownMs")) json.getLong("cooldownMs") else existing.cooldownMs,
-                            priority = if (json.has("priority")) json.getInt("priority") else existing.priority,
-                            updatedAt = System.currentTimeMillis()
-                        )
-
-                        autoTaskEngine.repository.updateProfile(updated)
+                        val updated = commands.patchProfile(id, JSONObject(bodyText))
 
                         val resp = JSONObject()
                         resp.put("status", "OK")
                         resp.put("message", "Profile patched")
-                        resp.put("profile", profileToJson(updated))
+                        resp.put("profile", AutomationCommandFacade.profileToJson(updated))
                         call.respondJson(resp.toString(2))
+                    } catch (e: ProfileNotFoundException) {
+                        call.respondError(HttpStatusCode.NotFound, e.message ?: "Profile not found")
                     } catch (e: Exception) {
                         call.respondError(HttpStatusCode.BadRequest, "Invalid JSON patch: ${e.localizedMessage}")
                     }
@@ -209,7 +272,7 @@ class KtorLoopbackServer(
                 // DELETE /v1/profiles/{id}
                 delete("/v1/profiles/{id}") {
                     val id = call.parameters["id"] ?: ""
-                    val deleted = autoTaskEngine.repository.deleteProfileById(id)
+                    val deleted = commands.deleteProfile(id)
                     if (deleted) {
                         val resp = JSONObject()
                         resp.put("status", "OK")
@@ -220,75 +283,121 @@ class KtorLoopbackServer(
                     }
                 }
 
+                // POST /v1/runs (Enqueue a durable run)
+                post("/v1/runs") {
+                    val bodyText = call.receiveText()
+                    try {
+                        val json = if (bodyText.isBlank()) JSONObject() else JSONObject(bodyText)
+                        val ctx = CommandContext(HttpSecurity.principalOf(call))
+                        call.respondJson(AutomationCommandFacade.eventResultToJson(commands.requestRun(json, ctx)).toString(2))
+                    } catch (e: ProfileNotFoundException) {
+                        call.respondError(HttpStatusCode.NotFound, e.message ?: "Profile not found")
+                    } catch (e: ApprovalRequiredException) {
+                        call.respondApprovalRequired(e)
+                    } catch (e: AccessDeniedException) {
+                        call.respondDenied(e)
+                    } catch (e: Exception) {
+                        call.respondError(HttpStatusCode.BadRequest, "Invalid run request: ${e.localizedMessage}")
+                    }
+                }
+
+                get("/v1/runs") {
+                    val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 50
+                    val profileId = call.request.queryParameters["profileId"]
+                    val arr = JSONArray()
+                    commands.listRuns(limit, profileId).forEach { arr.put(AutomationCommandFacade.runToJson(it)) }
+                    call.respondJson(JSONObject().put("runs", arr).put("count", arr.length()).toString(2))
+                }
+
+                get("/v1/runs/{id}") {
+                    val id = call.parameters["id"] ?: ""
+                    try {
+                        call.respondJson(AutomationCommandFacade.runToJson(commands.getRun(id)).toString(2))
+                    } catch (e: RunNotFoundException) {
+                        call.respondError(HttpStatusCode.NotFound, e.message ?: "Run not found")
+                    }
+                }
+
+                post("/v1/runs/{id}/cancel") {
+                    val id = call.parameters["id"] ?: ""
+                    try {
+                        call.respondJson(AutomationCommandFacade.runToJson(commands.cancelRun(id)).toString(2))
+                    } catch (e: RunNotFoundException) {
+                        call.respondError(HttpStatusCode.NotFound, e.message ?: "Run not found")
+                    }
+                }
+
+                post("/v1/runs/{id}/retry") {
+                    val id = call.parameters["id"] ?: ""
+                    try {
+                        call.respondJson(AutomationCommandFacade.runToJson(commands.retryRun(id)).toString(2))
+                    } catch (e: RunNotFoundException) {
+                        call.respondError(HttpStatusCode.NotFound, e.message ?: "Run not found")
+                    } catch (e: Exception) {
+                        call.respondError(HttpStatusCode.BadRequest, e.localizedMessage ?: "Retry failed")
+                    }
+                }
+
+                post("/v1/runs/{id}/resume") {
+                    val id = call.parameters["id"] ?: ""
+                    try {
+                        call.respondJson(AutomationCommandFacade.runToJson(commands.resumeRun(id)).toString(2))
+                    } catch (e: RunNotFoundException) {
+                        call.respondError(HttpStatusCode.NotFound, e.message ?: "Run not found")
+                    }
+                }
+
+                get("/v1/schedules") {
+                    val arr = JSONArray()
+                    commands.listSchedules().forEach { arr.put(AutomationCommandFacade.scheduleToJson(it)) }
+                    call.respondJson(JSONObject().put("schedules", arr).put("count", arr.length()).toString(2))
+                }
+
+                get("/v1/schedules/{id}") {
+                    val id = call.parameters["id"] ?: ""
+                    try {
+                        call.respondJson(AutomationCommandFacade.scheduleToJson(commands.getSchedule(id)).toString(2))
+                    } catch (e: ScheduleNotFoundException) {
+                        call.respondError(HttpStatusCode.NotFound, e.message ?: "Schedule not found")
+                    }
+                }
+
+                post("/v1/schedules/reconcile") {
+                    val bodyText = call.receiveText()
+                    val reason = try {
+                        if (bodyText.isBlank()) "manual" else JSONObject(bodyText).optString("reason", "manual")
+                    } catch (_: Exception) {
+                        "manual"
+                    }
+                    val arr = JSONArray()
+                    commands.reconcileSchedules(reason).forEach { arr.put(AutomationCommandFacade.scheduleToJson(it)) }
+                    call.respondJson(
+                        JSONObject()
+                            .put("status", "OK")
+                            .put("reason", reason)
+                            .put("schedules", arr)
+                            .put("count", arr.length())
+                            .toString(2)
+                    )
+                }
+
                 // POST /v1/events (Fire manual / test event)
                 post("/v1/events") {
                     val bodyText = call.receiveText()
                     try {
                         val json = if (bodyText.isBlank()) JSONObject() else JSONObject(bodyText)
-                        val request = EventRequestParser.parse(json)
-                        val triggerType = request.triggerType
-
-                        val targetProfile = if (triggerType == "MANUAL" && request.targetProfileId != null) {
-                            autoTaskEngine.repository.getProfileById(request.targetProfileId)
-                        } else {
-                            null
+                        val dryRun = json.optBoolean("dryRun", false) || json.optBoolean("dry_run", false)
+                        if (!dryRun) {
+                            HttpSecurity.require(call, access, AccessOperation.EXECUTE_RUNS)
                         }
-                        if (triggerType == "MANUAL" && request.targetProfileId != null && targetProfile == null) {
-                            call.respondError(HttpStatusCode.NotFound, "Profile not found: ${request.targetProfileId}")
-                            return@post
-                        }
-
-                        if (request.dryRun) {
-                            val plannedProfiles = if (targetProfile != null) {
-                                listOf(targetProfile)
-                            } else {
-                                autoTaskEngine.repository.profileDao.getEnabledProfilesForTrigger(triggerType)
-                            }
-                            val resp = JSONObject()
-                            resp.put("status", "OK")
-                            resp.put("dryRun", true)
-                            resp.put("triggerType", triggerType)
-                            resp.put("targetProfileId", request.targetProfileId ?: JSONObject.NULL)
-                            resp.put("profilesMatched", plannedProfiles.size)
-                            resp.put("logsGenerated", 0)
-                            val profilesArray = JSONArray()
-                            plannedProfiles.forEach { p ->
-                                val pObj = JSONObject()
-                                pObj.put("id", p.id)
-                                pObj.put("name", p.name)
-                                pObj.put("triggerType", p.triggerType)
-                                pObj.put("isEnabled", p.isEnabled)
-                                profilesArray.put(pObj)
-                            }
-                            resp.put("plannedProfiles", profilesArray)
-                            call.respondJson(resp.toString(2))
-                            return@post
-                        }
-
-                        val event = AutomationEvent(type = triggerType, payload = request.payload)
-                        val logs = autoTaskEngine.processEvent(event)
-
-                        val resp = JSONObject()
-                        resp.put("status", "OK")
-                        resp.put("dryRun", false)
-                        resp.put("triggerType", triggerType)
-                        resp.put("targetProfileId", request.targetProfileId ?: JSONObject.NULL)
-                        resp.put("logsGenerated", logs.size)
-
-                        val logsArray = JSONArray()
-                        logs.forEach { l ->
-                            val lObj = JSONObject()
-                            lObj.put("id", l.id)
-                            lObj.put("profileId", l.profileId)
-                            lObj.put("profileName", l.profileName)
-                            lObj.put("status", l.status)
-                            lObj.put("skippedReason", l.skippedReason)
-                            lObj.put("durationMs", l.durationMs)
-                            logsArray.put(lObj)
-                        }
-                        resp.put("results", logsArray)
-
-                        call.respondJson(resp.toString(2))
+                        val ctx = CommandContext(HttpSecurity.principalOf(call))
+                        call.respondJson(AutomationCommandFacade.eventResultToJson(commands.fireEvent(json, ctx)).toString(2))
+                    } catch (e: ProfileNotFoundException) {
+                        call.respondError(HttpStatusCode.NotFound, e.message ?: "Profile not found")
+                    } catch (e: ApprovalRequiredException) {
+                        call.respondApprovalRequired(e)
+                    } catch (e: AccessDeniedException) {
+                        call.respondDenied(e)
                     } catch (e: Exception) {
                         call.respondError(HttpStatusCode.BadRequest, "Invalid event request: ${e.localizedMessage}")
                     }
@@ -297,28 +406,18 @@ class KtorLoopbackServer(
                 // GET /v1/logs?limit=N
                 get("/v1/logs") {
                     val limitParam = call.request.queryParameters["limit"]?.toIntOrNull() ?: 100
-                    val logs = autoTaskEngine.repository.logDao.getLogs(limitParam)
+                    val logs = commands.listLogs(limitParam)
 
                     val arr = JSONArray()
                     logs.forEach { l ->
-                        val obj = JSONObject()
-                        obj.put("id", l.id)
-                        obj.put("profileId", l.profileId)
-                        obj.put("profileName", l.profileName)
-                        obj.put("triggerType", l.triggerType)
-                        obj.put("status", l.status)
-                        obj.put("skippedReason", l.skippedReason)
-                        obj.put("actionsResultJson", try { JSONArray(l.actionsResultJson) } catch (e: Exception) { l.actionsResultJson })
-                        obj.put("durationMs", l.durationMs)
-                        obj.put("timestamp", l.timestamp)
-                        arr.put(obj)
+                        arr.put(AutomationCommandFacade.logToJson(l))
                     }
                     call.respondJson(arr.toString(2))
                 }
 
                 // DELETE /v1/logs
                 delete("/v1/logs") {
-                    autoTaskEngine.repository.clearLogs()
+                    commands.clearLogs()
                     val resp = JSONObject()
                     resp.put("status", "OK")
                     resp.put("message", "Execution logs cleared")
@@ -600,37 +699,17 @@ class KtorLoopbackServer(
                 // POST /mcp — stateless MCP endpoint (protocol 2026-07-28).
                 // One JSON-RPC request per HTTP request; no sessions.
                 post("/mcp") {
-                    // Bearer-token auth mirroring the brain's UNIX socket: the
-                    // MCP surface is app-level, so it uses the same shared token.
-                    val auth = call.request.headers["Authorization"]
-                    val expected = "Bearer ${com.example.wa.BrainService.getToken(context)}"
-                    if (auth != expected) {
-                        call.respondText(
-                            com.example.mcp.McpHandler.error("Unauthorized: missing or invalid Bearer token").toString(),
-                            io.ktor.http.ContentType.Application.Json,
-                            HttpStatusCode.Unauthorized
-                        )
-                        return@post
-                    }
-                    // Origin check against DNS-rebinding (loopback server).
-                    val origin = call.request.headers["Origin"]
-                    if (origin != null && origin.isNotBlank()) {
-                        val okOrigin = origin == "http://127.0.0.1:8788" || origin == "http://localhost:8788"
-                        if (!okOrigin) {
-                            call.respondText(
-                                com.example.mcp.McpHandler.error("Origin not allowed").toString(),
-                                io.ktor.http.ContentType.Application.Json,
-                                HttpStatusCode.Forbidden
-                            )
-                            return@post
-                        }
-                    }
                     val bodyText = call.receiveText()
                     val headers = mutableMapOf<String, String>()
                     for (k in call.request.headers.names()) {
                         headers[k] = call.request.headers[k] ?: ""
                     }
-                    val result = com.example.mcp.McpHandler.handle(context, headers, bodyText)
+                    val result = com.example.mcp.McpHandler.handle(
+                        context,
+                        headers,
+                        bodyText,
+                        HttpSecurity.principalOf(call)
+                    )
                     val status = when (result.status) {
                         400 -> HttpStatusCode.BadRequest
                         403 -> HttpStatusCode.Forbidden
@@ -695,26 +774,32 @@ class KtorLoopbackServer(
         serverEngine = null
     }
 
-    private fun profileToJson(p: AutomationProfile): JSONObject {
-        val obj = JSONObject()
-        obj.put("id", p.id)
-        obj.put("name", p.name)
-        obj.put("description", p.description)
-        obj.put("isEnabled", p.isEnabled)
-        obj.put("triggerType", p.triggerType)
-        obj.put("triggerConfigJson", try { JSONObject(p.triggerConfigJson) } catch (e: Exception) { p.triggerConfigJson })
-        obj.put("conditionsJson", try { JSONObject(p.conditionsJson) } catch (e: Exception) { p.conditionsJson })
-        obj.put("actionsJson", try { JSONArray(p.actionsJson) } catch (e: Exception) { p.actionsJson })
-        obj.put("cooldownMs", p.cooldownMs)
-        obj.put("priority", p.priority)
-        obj.put("createdAt", p.createdAt)
-        obj.put("updatedAt", p.updatedAt)
-        obj.put("lastTriggeredAt", p.lastTriggeredAt)
-        return obj
+    private suspend fun ApplicationCall.respondJson(text: String, status: HttpStatusCode = HttpStatusCode.OK) {
+        HttpSecurity.recordIdempotent(this, access, status.value, text)
+        respondText(text, ContentType.Application.Json, status)
     }
 
-    private suspend fun ApplicationCall.respondJson(text: String, status: HttpStatusCode = HttpStatusCode.OK) {
-        respondText(text, ContentType.Application.Json, status)
+    private suspend fun ApplicationCall.respondDenied(error: AccessDeniedException) {
+        val body = JSONObject()
+            .put("error", error.code)
+            .put("code", error.code)
+            .put("status", error.status)
+            .put("message", error.message)
+            .toString(2)
+        HttpSecurity.recordIdempotent(this, access, error.status, body)
+        respondText(body, ContentType.Application.Json, HttpStatusCode.fromValue(error.status))
+    }
+
+    private suspend fun ApplicationCall.respondApprovalRequired(error: ApprovalRequiredException) {
+        val body = JSONObject()
+            .put("error", "APPROVAL_REQUIRED")
+            .put("code", "APPROVAL_REQUIRED")
+            .put("status", 403)
+            .put("message", error.message)
+            .put("actions", JSONArray(error.actions))
+            .toString(2)
+        HttpSecurity.recordIdempotent(this, access, 403, body)
+        respondText(body, ContentType.Application.Json, HttpStatusCode.Forbidden)
     }
 
     /**
@@ -775,6 +860,8 @@ class KtorLoopbackServer(
         err.put("error", status.description)
         err.put("code", status.value)
         err.put("message", message)
-        respondText(err.toString(2), ContentType.Application.Json, status)
+        val body = err.toString(2)
+        HttpSecurity.recordIdempotent(this, access, status.value, body)
+        respondText(body, ContentType.Application.Json, status)
     }
 }

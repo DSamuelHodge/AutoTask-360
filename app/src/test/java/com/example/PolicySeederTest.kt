@@ -1,6 +1,7 @@
 package com.example
 
 import com.example.data.PolicySeeder
+import com.example.domain.DefinitionCompiler
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertFalse
@@ -64,6 +65,8 @@ class PolicySeederTest {
         val actionType = actions.getJSONObject(i).getString("type").uppercase()
         assertTrue("${profile.id} uses unknown action $actionType", actionType in knownActions)
       }
+
+      DefinitionCompiler.compile(profile)
     }
   }
 

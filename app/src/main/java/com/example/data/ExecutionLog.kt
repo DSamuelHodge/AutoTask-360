@@ -13,5 +13,7 @@ data class ExecutionLog(
     val skippedReason: String = "",        // cooldown_active, condition_not_met, config_mismatch, profile_disabled
     val actionsResultJson: String,        // JSON array of step execution details
     val durationMs: Long,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    @androidx.room.ColumnInfo(defaultValue = "")
+    val runId: String = ""
 )

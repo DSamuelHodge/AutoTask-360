@@ -13,7 +13,7 @@ import android.os.BatteryManager
 import android.os.PowerManager
 import android.provider.Telephony
 import android.telephony.TelephonyManager
-import com.example.engine.AutoTaskEngine
+import com.example.application.AutomationCommandFacade
 import com.example.engine.AutomationEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,7 +22,7 @@ import kotlinx.coroutines.launch
 class SystemEventReceivers(private val context: Context) {
 
     private var isRegistered = false
-    private val engine = AutoTaskEngine.getInstance(context)
+    private val commands = AutomationCommandFacade.getInstance(context)
     private val scope = CoroutineScope(Dispatchers.IO)
 
     private val receiver = object : BroadcastReceiver() {
@@ -126,7 +126,12 @@ class SystemEventReceivers(private val context: Context) {
 
                 Intent.ACTION_TIMEZONE_CHANGED -> {
                     val tz = intent.getStringExtra("time-zone") ?: ""
+                    reconcile("timezone")
                     dispatch("TIMEZONE", mapOf("timezone" to tz))
+                }
+
+                Intent.ACTION_TIME_CHANGED -> {
+                    reconcile("time_changed")
                 }
 
                 Intent.ACTION_LOCALE_CHANGED -> {
@@ -170,6 +175,7 @@ class SystemEventReceivers(private val context: Context) {
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
             addAction(Intent.ACTION_TIMEZONE_CHANGED)
+            addAction(Intent.ACTION_TIME_CHANGED)
             addAction(Intent.ACTION_LOCALE_CHANGED)
             addAction(TelephonyManager.ACTION_PHONE_STATE_CHANGED)
         }
@@ -193,8 +199,13 @@ class SystemEventReceivers(private val context: Context) {
 
     private fun dispatch(triggerType: String, payload: Map<String, Any?>) {
         scope.launch {
-            engine.processEvent(AutomationEvent(type = triggerType, payload = payload))
+            commands.processEvent(AutomationEvent(type = triggerType, payload = payload))
+        }
+    }
+
+    private fun reconcile(reason: String) {
+        scope.launch {
+            commands.reconcileSchedules(reason)
         }
     }
 }
-

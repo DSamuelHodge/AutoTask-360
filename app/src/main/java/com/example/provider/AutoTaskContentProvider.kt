@@ -6,11 +6,9 @@ import android.content.UriMatcher
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
+import com.example.application.AutomationCommandFacade
 import com.example.data.AutomationProfile
-import com.example.data.AutoTaskDatabase
-import com.example.engine.AutoTaskEngine
 import com.example.engine.AutomationEvent
-import com.example.engine.CapabilityProvider
 import com.example.server.KtorServerConfig
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
@@ -39,13 +37,11 @@ class AutoTaskContentProvider : ContentProvider() {
         }
     }
 
-    private lateinit var db: AutoTaskDatabase
-    private lateinit var engine: AutoTaskEngine
+    private lateinit var commands: AutomationCommandFacade
 
     override fun onCreate(): Boolean {
         val ctx = context ?: return false
-        db = AutoTaskDatabase.getInstance(ctx)
-        engine = AutoTaskEngine.getInstance(ctx)
+        commands = AutomationCommandFacade.getInstance(ctx)
         return true
     }
 
@@ -80,11 +76,11 @@ class AutoTaskContentProvider : ContentProvider() {
                     "version"
                 ))
                 runBlocking {
-                    val profileCount = db.profileDao().getProfileCount()
-                    val logCount = db.logDao().getLogCount()
-                    val isRunning = if (engine.isRunning) 1 else 0
+                    val status = commands.statusMap()
+                    val profileCount = status["profile_count"]
+                    val logCount = status["log_count"]
+                    val isRunning = if (commands.isRunning) 1 else 0
                     val serverConfig = KtorServerConfig.getSnapshot(requireNotNull(context))
-                    val permissionSummary = CapabilityProvider.permissionSummary(requireNotNull(context))
                     cursor.addRow(arrayOf(
                         isRunning,
                         profileCount,
@@ -97,14 +93,14 @@ class AutoTaskContentProvider : ContentProvider() {
                         serverConfig.listenerPort,
                         serverConfig.lastError,
                         serverConfig.lastResult,
-                        permissionSummary["notification_policy_declared"],
-                        permissionSummary["notification_policy_granted"],
-                        permissionSummary["write_settings_granted"],
-                        permissionSummary["notification_listener_enabled"],
-                        permissionSummary["dnd_ready"],
-                        permissionSummary["device_settings_ready"],
-                        engine.getUptimeMs(),
-                        "1.0.0"
+                        status["notification_policy_declared"],
+                        status["notification_policy_granted"],
+                        status["write_settings_granted"],
+                        status["notification_listener_enabled"],
+                        status["dnd_ready"],
+                        status["device_settings_ready"],
+                        commands.uptimeMs(),
+                        status["version"] ?: com.example.BuildConfig.VERSION_NAME
                     ))
                 }
                 cursor
@@ -114,15 +110,17 @@ class AutoTaskContentProvider : ContentProvider() {
                 val cursor = MatrixCursor(arrayOf(
                     "id", "name", "description", "isEnabled", "triggerType",
                     "triggerConfigJson", "conditionsJson", "actionsJson",
-                    "cooldownMs", "priority", "createdAt", "updatedAt", "lastTriggeredAt"
+                    "cooldownMs", "priority", "createdAt", "updatedAt", "lastTriggeredAt",
+                    "schemaVersion", "revision"
                 ))
                 runBlocking {
-                    val profiles = db.profileDao().getAllProfiles()
+                    val profiles = commands.listProfiles()
                     profiles.forEach { p ->
                         cursor.addRow(arrayOf(
                             p.id, p.name, p.description, if (p.isEnabled) 1 else 0, p.triggerType,
                             p.triggerConfigJson, p.conditionsJson, p.actionsJson,
-                            p.cooldownMs, p.priority, p.createdAt, p.updatedAt, p.lastTriggeredAt
+                            p.cooldownMs, p.priority, p.createdAt, p.updatedAt, p.lastTriggeredAt,
+                            p.schemaVersion, p.revision
                         ))
                     }
                 }
@@ -134,15 +132,17 @@ class AutoTaskContentProvider : ContentProvider() {
                 val cursor = MatrixCursor(arrayOf(
                     "id", "name", "description", "isEnabled", "triggerType",
                     "triggerConfigJson", "conditionsJson", "actionsJson",
-                    "cooldownMs", "priority", "createdAt", "updatedAt", "lastTriggeredAt"
+                    "cooldownMs", "priority", "createdAt", "updatedAt", "lastTriggeredAt",
+                    "schemaVersion", "revision"
                 ))
                 runBlocking {
-                    val p = db.profileDao().getProfileById(id)
+                    val p = commands.getProfile(id)
                     if (p != null) {
                         cursor.addRow(arrayOf(
                             p.id, p.name, p.description, if (p.isEnabled) 1 else 0, p.triggerType,
                             p.triggerConfigJson, p.conditionsJson, p.actionsJson,
-                            p.cooldownMs, p.priority, p.createdAt, p.updatedAt, p.lastTriggeredAt
+                            p.cooldownMs, p.priority, p.createdAt, p.updatedAt, p.lastTriggeredAt,
+                            p.schemaVersion, p.revision
                         ))
                     }
                 }
@@ -156,7 +156,7 @@ class AutoTaskContentProvider : ContentProvider() {
                     "status", "skippedReason", "actionsResultJson", "durationMs", "timestamp"
                 ))
                 runBlocking {
-                    val logs = db.logDao().getLogs(limit)
+                    val logs = commands.listLogs(limit)
                     logs.forEach { l ->
                         cursor.addRow(arrayOf(
                             l.id, l.profileId, l.profileName, l.triggerType,
@@ -203,7 +203,7 @@ class AutoTaskContentProvider : ContentProvider() {
                     updatedAt = now
                 )
                 runBlocking {
-                    db.profileDao().upsertProfile(profile)
+                    commands.upsertProfile(profile)
                 }
                 Uri.withAppendedPath(CONTENT_URI_PROFILES, id)
             }
@@ -231,7 +231,7 @@ class AutoTaskContentProvider : ContentProvider() {
 
                 val event = AutomationEvent(type = triggerType, payload = payloadMap)
                 val logs = runBlocking {
-                    engine.processEvent(event)
+                    commands.processEvent(event)
                 }
                 val firstLogId = logs.firstOrNull()?.id ?: 0L
                 Uri.withAppendedPath(CONTENT_URI_EVENTS, firstLogId.toString())
@@ -252,7 +252,7 @@ class AutoTaskContentProvider : ContentProvider() {
             CODE_PROFILE_ID -> {
                 val id = uri.lastPathSegment ?: return 0
                 runBlocking {
-                    val existing = db.profileDao().getProfileById(id) ?: return@runBlocking 0
+                    val existing = commands.getProfile(id) ?: return@runBlocking 0
                     val updated = existing.copy(
                         name = values.getAsString("name") ?: existing.name,
                         description = values.getAsString("description") ?: existing.description,
@@ -265,7 +265,7 @@ class AutoTaskContentProvider : ContentProvider() {
                         priority = values.getAsInteger("priority") ?: existing.priority,
                         updatedAt = System.currentTimeMillis()
                     )
-                    db.profileDao().updateProfile(updated)
+                    commands.updateProfile(updated)
                     1
                 }
             }
@@ -282,12 +282,12 @@ class AutoTaskContentProvider : ContentProvider() {
             CODE_PROFILE_ID -> {
                 val id = uri.lastPathSegment ?: return 0
                 runBlocking {
-                    db.profileDao().deleteProfileById(id)
+                    if (commands.deleteProfile(id)) 1 else 0
                 }
             }
             CODE_LOGS -> {
                 runBlocking {
-                    db.logDao().clearLogs()
+                    commands.clearLogs()
                 }
             }
             else -> 0

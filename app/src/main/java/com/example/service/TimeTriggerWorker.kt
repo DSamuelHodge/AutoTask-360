@@ -3,7 +3,7 @@ package com.example.service
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.example.engine.AutoTaskEngine
+import com.example.application.AutomationCommandFacade
 import com.example.engine.AutomationEvent
 import java.util.Calendar
 
@@ -13,12 +13,12 @@ class TimeTriggerWorker(
 ) : CoroutineWorker(appContext, workerParams) {
 
     override suspend fun doWork(): Result {
-        val engine = AutoTaskEngine.getInstance(applicationContext)
+        val commands = AutomationCommandFacade.getInstance(applicationContext)
         val cal = Calendar.getInstance()
         val hour = cal.get(Calendar.HOUR_OF_DAY)
         val minute = cal.get(Calendar.MINUTE)
 
-        engine.processEvent(
+        commands.processEvent(
             AutomationEvent(
                 type = "TIME",
                 payload = mapOf(

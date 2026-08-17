@@ -3,14 +3,16 @@
 This guide connects an agentic harness running on a Mac host to the
 Sapphire-Blu MCP server running inside the Android app.
 
-This is a **local development** setup. LAN access is bearer-authenticated, but
-do not expose port `8788` to the internet. The production remote-access design
-is not implemented yet.
+This is a **local development** setup. The Ktor server binds loopback by
+default. Use `adb forward` (below). LAN bind requires an explicit paired
+`atc-` credential and is documented in `docs/LAN_SECURITY.md`. Do not expose
+port `8788` to the internet.
 
 ## Connection topology
 
-The Android Ktor server binds to all phone interfaces and protects
-non-loopback REST requests with the brain bearer token:
+The Android Ktor server binds `127.0.0.1` unless LAN mode is enabled after
+pairing. Loopback MCP accepts the internal brain token; LAN requests must use
+a paired client token and never the brain token:
 
 ```text
 Agent harness on Mac
@@ -194,8 +196,29 @@ The host-specific implementation used during development is:
 ```
 
 This bridge is a Codex host integration, not an Android app component, and
-should not be committed with credentials. It was verified to expose the 16
-CoS tools over stdio.
+should not be committed with credentials. It was verified to expose the CoS
+tools over stdio.
+
+## AutoTask automation MCP tools
+
+The same `/mcp` endpoint also exposes the AutoTask360 automation control plane
+so an agent can create and test persistent multi-step device workflows without
+hand-writing REST calls:
+
+- `autotask.schema`
+- `autotask.capabilities`
+- `autotask.profiles.list`
+- `autotask.profiles.get`
+- `autotask.profiles.upsert`
+- `autotask.profiles.patch`
+- `autotask.profiles.delete`
+- `autotask.events.fire`
+- `autotask.logs.list`
+
+Use `autotask.schema` first when constructing a profile. It returns supported
+trigger types, action types, parameter names, risk notes, and template
+variables. Use `autotask.events.fire` with `dryRun=true` before live execution;
+for direct profile execution, send `triggerType=MANUAL` with `profileId`.
 
 After changing global MCP configuration, fully quit and reopen Codex or start
 a new task. An already-running chat does not hot-load newly configured MCP

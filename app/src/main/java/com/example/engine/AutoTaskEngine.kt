@@ -1,24 +1,64 @@
 package com.example.engine
 
 import android.content.Context
+import android.location.LocationManager
+import androidx.core.content.ContextCompat
+import com.example.data.AutoTaskDatabase
 import com.example.data.AutoTaskRepository
 import com.example.data.ExecutionLog
+import com.example.data.RoomRunStore
+import com.example.data.RoomScheduleStore
+import com.example.domain.EventEnvelope
+import com.example.domain.GeoPoint
+import com.example.domain.RunSnapshot
+import com.example.domain.RunStatuses
+import com.example.domain.ScheduleFire
+import com.example.domain.ScheduleRegistration
+import com.example.service.AndroidScheduleDriver
+import com.example.service.WorkManagerWakeScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import org.json.JSONArray
-import org.json.JSONObject
 
 class AutoTaskEngine private constructor(
     private val context: Context
 ) {
     val repository = AutoTaskRepository(context.applicationContext)
     val executor = ActionExecutor(context.applicationContext, repository)
+    val runStore: RunStore = RoomRunStore(AutoTaskDatabase.getInstance(context))
+    val coordinator = RunCoordinator(
+        store = runStore,
+        runner = StepRunner { profile, event, stepIndex, type, params ->
+            executor.executeStep(stepIndex, type, params, profile, event)
+        },
+        wakeScheduler = WorkManagerWakeScheduler(context.applicationContext),
+        onTerminal = { run, _, profile, _ ->
+            if (run.status == RunStatuses.SUCCESS ||
+                run.status == RunStatuses.PARTIAL ||
+                run.status == RunStatuses.FAILED
+            ) {
+                repository.profileDao.updateLastTriggeredAt(profile.id, run.finishedAt ?: run.updatedAt)
+            }
+        },
+        loadProfile = { repository.getProfileById(it) }
+    )
+    val dispatcher = EventDispatcher(
+        store = runStore,
+        coordinator = coordinator,
+        loadEnabled = { repository.profileDao.getEnabledProfilesForTrigger(it) },
+        loadProfile = { repository.getProfileById(it) },
+        deviceState = { collectCurrentDeviceState() },
+        insertLog = { repository.insertLog(it) }
+    )
+    val scheduleManager = ScheduleManager(
+        store = RoomScheduleStore(AutoTaskDatabase.getInstance(context)),
+        driver = AndroidScheduleDriver(context.applicationContext),
+        loadProfiles = { repository.profileDao.getAllProfiles() },
+        location = { lastKnownLocation() },
+        onFire = { fire -> ingestScheduleFire(fire) }
+    )
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val mutex = Mutex()
 
     val startTimeMs = System.currentTimeMillis()
     var isRunning = true
@@ -38,8 +78,11 @@ class AutoTaskEngine private constructor(
     }
 
     init {
+        repository.onProfileMutated = { profileId -> syncSchedule(profileId) }
         scope.launch {
             repository.seedDefaultRecipesIfNeeded()
+            coordinator.recoverIncomplete()
+            scheduleManager.reconcile("startup")
         }
         // One-shot location warm-up: the LocationManager only serves
         // getLastKnownLocation to apps that have (recently) been active
@@ -75,99 +118,109 @@ class AutoTaskEngine private constructor(
         } catch (_: Exception) {}
     }
 
-    suspend fun processEvent(event: AutomationEvent): List<ExecutionLog> = mutex.withLock {
+    suspend fun processEvent(event: AutomationEvent): List<ExecutionLog> {
         if (!isRunning) return emptyList()
-
-        val enabledProfiles = repository.profileDao.getEnabledProfilesForTrigger(event.type)
-        val now = System.currentTimeMillis()
-        val logsWritten = mutableListOf<ExecutionLog>()
-
-        // Sort by priority descending
-        val sortedProfiles = enabledProfiles.sortedByDescending { it.priority }
-
-        if (sortedProfiles.isEmpty() && event.type != "MANUAL") {
-            // No profiles registered for this trigger type
-            return emptyList()
-        }
-
-        // Handle MANUAL trigger if fired directly with a specific profileId in payload
         val targetProfileId = event.payload["profileId"]?.toString()
-        val isTargetedManualEvent = event.type == "MANUAL" && !targetProfileId.isNullOrEmpty()
-        val targetProfiles = if (isTargetedManualEvent) {
-            val prof = repository.getProfileById(targetProfileId)
-            if (prof != null) listOf(prof) else emptyList()
-        } else {
-            sortedProfiles
-        }
-
-        for (profile in targetProfiles) {
-            val matchResult = Matcher.evaluate(
-                profile = profile,
-                event = event,
-                deviceState = collectCurrentDeviceState(),
-                nowMs = now,
-                evaluateCooldown = !isTargetedManualEvent,
-                evaluateTriggerConfig = !isTargetedManualEvent
-            )
-
-            if (!matchResult.isMatch) {
-                if (shouldRecordSkippedLog(matchResult.skippedReason)) {
-                    val skippedLog = ExecutionLog(
-                        profileId = profile.id,
-                        profileName = profile.name,
-                        triggerType = event.type,
-                        status = "SKIPPED",
-                        skippedReason = matchResult.skippedReason,
-                        actionsResultJson = "[]",
-                        durationMs = 0L,
-                        timestamp = now
-                    )
-                    val insertedId = repository.insertLog(skippedLog)
-                    logsWritten.add(skippedLog.copy(id = insertedId))
-                }
-                continue
-            }
-
-            // Execute Actions
-            val startTime = System.currentTimeMillis()
-            val (status, stepResults) = executor.executeActions(profile, event)
-            val duration = System.currentTimeMillis() - startTime
-
-            // Format step results JSON
-            val resultsArray = JSONArray()
-            stepResults.forEach { res ->
-                val obj = JSONObject()
-                obj.put("step", res.step)
-                obj.put("type", res.type)
-                obj.put("status", res.status)
-                obj.put("detail", res.detail)
-                resultsArray.put(obj)
-            }
-
-            // Write execution log
-            val log = ExecutionLog(
-                profileId = profile.id,
-                profileName = profile.name,
-                triggerType = event.type,
-                status = status,
-                skippedReason = "",
-                actionsResultJson = resultsArray.toString(),
-                durationMs = duration,
-                timestamp = now
-            )
-
-            val insertedId = repository.insertLog(log)
-            logsWritten.add(log.copy(id = insertedId))
-
-            // Update lastTriggeredAt timestamp
-            repository.profileDao.updateLastTriggeredAt(profile.id, now)
-        }
-
-        return logsWritten
+        val targeted = event.type == "MANUAL" && !targetProfileId.isNullOrBlank()
+        return dispatch(
+            EventEnvelope.create(
+                type = event.type,
+                payload = event.payload,
+                source = "internal",
+                occurredAt = event.timestamp
+            ),
+            targetProfileId = if (targeted) targetProfileId else null
+        ).logs
     }
 
-    private fun shouldRecordSkippedLog(skippedReason: String): Boolean {
-        return skippedReason != "config_mismatch"
+    suspend fun dispatch(
+        event: EventEnvelope,
+        targetProfileId: String? = null,
+        executeNow: Boolean = true
+    ): DispatchResult {
+        if (!isRunning) {
+            return DispatchResult(event, emptyList(), emptyList(), emptyList(), deduplicated = false)
+        }
+        return dispatcher.dispatch(
+            event = event,
+            targetProfileId = targetProfileId,
+            executeNow = executeNow
+        )
+    }
+
+    suspend fun getRun(runId: String): RunSnapshot? {
+        val run = runStore.getRun(runId) ?: return null
+        return RunSnapshot(run, runStore.listSteps(runId))
+    }
+
+    suspend fun listRuns(limit: Int, profileId: String? = null): List<RunSnapshot> {
+        return runStore.listRuns(limit.coerceIn(1, 500), profileId).map { run ->
+            RunSnapshot(run, runStore.listSteps(run.runId))
+        }
+    }
+
+    suspend fun cancelRun(runId: String): RunSnapshot = coordinator.cancel(runId)
+
+    suspend fun retryRun(runId: String): RunSnapshot {
+        val retry = coordinator.retry(runId)
+        return coordinator.execute(retry)
+    }
+
+    suspend fun resumeRun(runId: String): RunSnapshot = coordinator.execute(runId)
+
+    suspend fun listSchedules(): List<ScheduleRegistration> = scheduleManager.list()
+
+    suspend fun getSchedule(profileId: String): ScheduleRegistration? = scheduleManager.get(profileId)
+
+    suspend fun reconcileSchedules(reason: String): List<ScheduleRegistration> =
+        scheduleManager.reconcile(reason)
+
+    suspend fun deliverSchedule(scheduleId: String, scheduledFor: Long): ScheduleFire? =
+        scheduleManager.deliver(scheduleId, scheduledFor)
+
+    suspend fun syncSchedule(profileId: String) {
+        val profile = repository.getProfileById(profileId)
+        if (profile == null) {
+            scheduleManager.unschedule(profileId)
+        } else {
+            scheduleManager.syncProfile(profile)
+        }
+    }
+
+    private suspend fun ingestScheduleFire(fire: ScheduleFire) {
+        dispatch(
+            EventEnvelope.create(
+                type = fire.triggerType,
+                payload = fire.payload,
+                source = "scheduler",
+                occurredAt = fire.scheduledFor,
+                receivedAt = fire.firedAt,
+                dedupeKey = fire.dedupeKey,
+                correlationId = fire.deliveryId
+            ),
+            targetProfileId = fire.profileId
+        )
+    }
+
+    private fun lastKnownLocation(): GeoPoint? {
+        return try {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.ACCESS_FINE_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted) return null
+            val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
+            val loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                ?: lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
+            loc?.let { GeoPoint(it.latitude, it.longitude) }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun collectCurrentDeviceState(): Map<String, Any?> {

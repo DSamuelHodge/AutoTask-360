@@ -10,7 +10,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.webkit.WebSettings
-import com.example.engine.AutoTaskEngine
+import com.example.application.AutomationCommandFacade
 import com.example.engine.AutomationEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -63,10 +63,10 @@ object WhatsAppBridgeManager {
     var onInbound: ((sender: String, text: String) -> Unit)? = null
 
     /** Holds the engine instance for firing events (set once at init). */
-    private var engineRef: AutoTaskEngine? = null
+    private var commandsRef: AutomationCommandFacade? = null
 
     fun initialize(context: Context) {
-        engineRef = AutoTaskEngine.getInstance(context)
+        commandsRef = AutomationCommandFacade.getInstance(context)
     }
 
     /**
@@ -210,10 +210,10 @@ object WhatsAppBridgeManager {
                 val text = obj.optString("text", "")
                 if (text.isBlank()) return
 
-                val engine = engineRef ?: return
+                val commands = commandsRef ?: return
                 val scope = CoroutineScope(Dispatchers.IO)
                 scope.launch {
-                    engine.processEvent(
+                    commands.processEvent(
                         AutomationEvent(
                             type = "NOTIFICATION",
                             payload = mapOf(
