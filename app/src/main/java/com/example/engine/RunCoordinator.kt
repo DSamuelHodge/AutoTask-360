@@ -12,11 +12,13 @@ import com.example.domain.RunNotFoundException
 import com.example.domain.RunSnapshot
 import com.example.domain.RunStatuses
 import com.example.domain.StepResumePolicy
+import com.example.domain.StepRetryPolicy
 import com.example.domain.StepRun
 import com.example.domain.StepStatuses
 import com.example.domain.toAutomationEvent
 import org.json.JSONObject
 import java.util.UUID
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
 
@@ -49,7 +51,10 @@ class RunCoordinator(
     private val loadProfile: suspend (String) -> AutomationProfile? = { null },
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val stepTimeoutMs: Long = DEFAULT_STEP_TIMEOUT_MS,
-    private val idFactory: () -> String = { UUID.randomUUID().toString() }
+    private val idFactory: () -> String = { UUID.randomUUID().toString() },
+    private val mayReenter: (String) -> Boolean = { StepResumePolicy.mayReenter(it) },
+    private val maxStepAttempts: Int = StepRetryPolicy.DEFAULT_MAX_ATTEMPTS,
+    private val retrySleeper: suspend (Long) -> Unit = { delay(it) }
 ) {
     suspend fun execute(runId: String): RunSnapshot {
         val run = store.getRun(runId) ?: throw RunNotFoundException(runId)
@@ -120,7 +125,7 @@ class RunCoordinator(
             if (existing?.status == StepStatuses.INDETERMINATE) {
                 return finishIndeterminate(current, existing, now, profile, event)
             }
-            if (existing?.status == StepStatuses.RUNNING && !StepResumePolicy.safeToReenter(type)) {
+            if (existing?.status == StepStatuses.RUNNING && !mayReenter(type)) {
                 val marked = existing.copy(
                     status = StepStatuses.INDETERMINATE,
                     detail = "resume_indeterminate",
@@ -131,13 +136,14 @@ class RunCoordinator(
             }
 
             val effectId = existing?.effectId?.takeIf { it.isNotBlank() } ?: idFactory()
-            val stepRecord = StepRun(
+            var stepAttempt = existing?.attempt?.takeIf { it > 0 } ?: 1
+            var stepRecord = StepRun(
                 stepRunId = existing?.stepRunId ?: idFactory(),
                 runId = current.runId,
                 stepIndex = index,
                 type = type,
                 status = StepStatuses.RUNNING,
-                attempt = current.attempt,
+                attempt = stepAttempt,
                 startedAt = existing?.startedAt ?: now,
                 effectId = effectId
             )
@@ -177,24 +183,37 @@ class RunCoordinator(
                 return RunSnapshot(current, store.listSteps(current.runId))
             }
 
-            val result = try {
-                withTimeout(stepTimeoutMs) {
-                    runner.run(profile, event, index, type, spec.params.toJsonObject(), effectId)
+            var result: StepResult
+            while (true) {
+                result = try {
+                    withTimeout(stepTimeoutMs) {
+                        runner.run(profile, event, index, type, spec.params.toJsonObject(), effectId)
+                    }
+                } catch (_: TimeoutCancellationException) {
+                    StepResult(index, type, StepStatuses.FAILED, "step_timeout")
+                } catch (e: Exception) {
+                    StepResult(index, type, StepStatuses.FAILED, e.localizedMessage ?: "step_exception")
                 }
-            } catch (_: TimeoutCancellationException) {
-                StepResult(index, type, "FAILED", "step_timeout")
-            } catch (e: Exception) {
-                StepResult(index, type, "FAILED", e.localizedMessage ?: "step_exception")
+                if (result.status != StepStatuses.FAILED) break
+                if (stepAttempt >= maxStepAttempts || !StepRetryPolicy.retryable(result.status, result.detail)) {
+                    break
+                }
+                val sleepMs = StepRetryPolicy.backoffMs(stepAttempt)
+                retrySleeper(sleepMs)
+                stepAttempt += 1
+                stepRecord = stepRecord.copy(attempt = stepAttempt, status = StepStatuses.RUNNING)
+                store.upsertStep(stepRecord)
             }
 
             store.upsertStep(
                 stepRecord.copy(
                     status = result.status,
                     detail = result.detail,
+                    attempt = stepAttempt,
                     finishedAt = clock()
                 )
             )
-            if (result.status == "FAILED") {
+            if (result.status == StepStatuses.FAILED) {
                 return fail(current, steps, index + 1, result.detail, clock(), profile, event)
             }
             index += 1

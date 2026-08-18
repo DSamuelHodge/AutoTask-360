@@ -14,9 +14,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         EventEnvelopeEntity::class,
         AutomationRunEntity::class,
         StepRunEntity::class,
-        ScheduleRegistrationEntity::class
+        ScheduleRegistrationEntity::class,
+        EffectRecordEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class AutoTaskDatabase : RoomDatabase() {
@@ -26,6 +27,7 @@ abstract class AutoTaskDatabase : RoomDatabase() {
     abstract fun runDao(): AutomationRunDao
     abstract fun stepDao(): StepRunDao
     abstract fun scheduleDao(): ScheduleRegistrationDao
+    abstract fun effectDao(): EffectRecordDao
 
     companion object {
         const val DATABASE_NAME = "autotask.db"
@@ -150,6 +152,25 @@ abstract class AutoTaskDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS effect_records (
+                        effectId TEXT NOT NULL PRIMARY KEY,
+                        type TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        detail TEXT NOT NULL,
+                        runId TEXT,
+                        stepIndex INTEGER,
+                        completedAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_effect_records_completedAt ON effect_records(completedAt)")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AutoTaskDatabase? = null
 
@@ -160,7 +181,7 @@ abstract class AutoTaskDatabase : RoomDatabase() {
                     AutoTaskDatabase::class.java,
                     DATABASE_NAME
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .build()
                 LegacyAutoTaskMigration.importIfNeeded(context.applicationContext, instance)
                 INSTANCE = instance

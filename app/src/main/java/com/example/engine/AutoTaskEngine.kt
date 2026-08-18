@@ -26,8 +26,12 @@ class AutoTaskEngine private constructor(
     private val context: Context
 ) {
     val repository = AutoTaskRepository(context.applicationContext)
-    val executor = ActionExecutor(context.applicationContext, repository)
     val runStore: RunStore = RoomRunStore(AutoTaskDatabase.getInstance(context))
+    val executor = ActionExecutor(
+        context.applicationContext,
+        repository,
+        ledger = runStore
+    )
     val coordinator = RunCoordinator(
         store = runStore,
         runner = StepRunner { profile, event, stepIndex, type, params, effectId ->

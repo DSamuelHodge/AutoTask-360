@@ -3,6 +3,8 @@ package com.example.engine
 import android.content.Context
 import com.example.data.AutomationProfile
 import com.example.data.AutoTaskRepository
+import com.example.domain.EffectRecord
+import com.example.domain.StepStatuses
 import com.example.engine.actions.ActionRegistry
 import com.example.engine.actions.ActionRequest
 import com.example.engine.actions.ActionServices
@@ -33,7 +35,9 @@ data class StepResult(
 class ActionExecutor(
     private val context: Context,
     private val repository: AutoTaskRepository,
-    private val registry: ActionRegistry = ActionRegistry.standard()
+    private val registry: ActionRegistry = ActionRegistry.standard(),
+    private val ledger: RunStore? = null,
+    private val clock: () -> Long = { System.currentTimeMillis() }
 ) {
     companion object {
         fun finalStatusFor(results: List<StepResult>): String {
@@ -95,6 +99,12 @@ class ActionExecutor(
         handler.capabilityDenial(context, params)?.let { reason ->
             return StepResult(stepIndex, type, "SKIPPED", reason)
         }
+        if (handler.dedupesByEffectId && !effectId.isNullOrBlank()) {
+            val remembered = ledger?.getEffect(effectId)
+            if (remembered != null && remembered.status == StepStatuses.OK) {
+                return StepResult(stepIndex, type, StepStatuses.OK, remembered.detail)
+            }
+        }
         val request = ActionRequest(
             context = context,
             repository = repository,
@@ -107,7 +117,7 @@ class ActionExecutor(
             services = services,
             effectId = effectId
         )
-        return try {
+        val result = try {
             withTimeout(handler.timeoutMs) {
                 handler.execute(request)
             }
@@ -116,6 +126,19 @@ class ActionExecutor(
         } catch (e: Exception) {
             StepResult(stepIndex, type, "FAILED", e.localizedMessage ?: "Action execution exception")
         }
+        if (handler.dedupesByEffectId && !effectId.isNullOrBlank() && result.status == StepStatuses.OK) {
+            ledger?.putEffect(
+                EffectRecord(
+                    effectId = effectId,
+                    type = type,
+                    status = StepStatuses.OK,
+                    detail = result.detail,
+                    stepIndex = stepIndex,
+                    completedAt = clock()
+                )
+            )
+        }
+        return result
     }
 
     fun shutdown() {

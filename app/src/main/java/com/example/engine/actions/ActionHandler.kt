@@ -59,7 +59,10 @@ interface ActionHandler {
     fun capabilityDenial(context: Context, params: JSONObject): String? = null
 
     val safeToReenter: Boolean
-        get() = StepResumePolicy.safeToReenter(type)
+        get() = StepResumePolicy.mayReenter(type)
+
+    val dedupesByEffectId: Boolean
+        get() = StepResumePolicy.dedupesByEffectId(type)
 
     suspend fun execute(request: ActionRequest): StepResult
 }

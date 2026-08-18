@@ -39,14 +39,17 @@ class ActionRegistryTest {
     }
 
     @Test
-    fun handlersDefaultToFailClosedResumeExceptLogWaitToast() {
+    fun handlersDefaultToFailClosedResumeExceptSafeAndDedupeTypes() {
         val registry = ActionRegistry.standard()
         assertTrue(registry.handler("LOG")!!.safeToReenter)
         assertTrue(registry.handler("WAIT")!!.safeToReenter)
         assertTrue(registry.handler("TOAST")!!.safeToReenter)
-        assertFalse(registry.handler("SEND_SMS")!!.safeToReenter)
-        assertFalse(registry.handler("HTTP")!!.safeToReenter)
-        assertFalse(registry.handler("CALL")!!.safeToReenter)
+        assertTrue(registry.handler("SEND_SMS")!!.safeToReenter)
+        assertTrue(registry.handler("SEND_SMS")!!.dedupesByEffectId)
+        assertTrue(registry.handler("HTTP")!!.dedupesByEffectId)
+        assertFalse(registry.handler("CAMERA")!!.safeToReenter)
+        assertFalse(registry.handler("CAMERA")!!.dedupesByEffectId)
+        assertFalse(registry.handler("WIFI_ACTION")!!.safeToReenter)
     }
 
     @Test

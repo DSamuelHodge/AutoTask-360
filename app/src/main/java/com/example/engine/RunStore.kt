@@ -1,6 +1,7 @@
 package com.example.engine
 
 import com.example.domain.AutomationRun
+import com.example.domain.EffectRecord
 import com.example.domain.EventEnvelope
 import com.example.domain.RunStatuses
 import com.example.domain.StepRun
@@ -22,6 +23,9 @@ interface RunStore {
 
     suspend fun upsertStep(step: StepRun)
     suspend fun listSteps(runId: String): List<StepRun>
+
+    suspend fun getEffect(effectId: String): EffectRecord?
+    suspend fun putEffect(record: EffectRecord)
 }
 
 class InMemoryRunStore : RunStore {
@@ -89,5 +93,13 @@ class InMemoryRunStore : RunStore {
     override suspend fun listSteps(runId: String): List<StepRun> {
         val list = steps[runId] ?: return emptyList()
         synchronized(list) { return list.toList() }
+    }
+
+    private val effects = ConcurrentHashMap<String, EffectRecord>()
+
+    override suspend fun getEffect(effectId: String): EffectRecord? = effects[effectId]
+
+    override suspend fun putEffect(record: EffectRecord) {
+        effects[record.effectId] = record
     }
 }

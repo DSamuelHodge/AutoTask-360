@@ -16,11 +16,13 @@ class RetentionSweeper(
         val deletedEvents = database.eventDao().deleteOrphansOlderThan(eventCutoff)
         val deletedByAge = database.logDao().deleteOlderThan(logCutoff)
         val deletedByCount = database.logDao().trimToNewest(limits.logMaxRows)
+        val deletedEffects = database.effectDao().deleteOlderThan(runCutoff)
         return RetentionReport(
             deletedRuns = deletedRuns,
             deletedSteps = deletedSteps,
             deletedEvents = deletedEvents,
-            deletedLogs = deletedByAge + deletedByCount
+            deletedLogs = deletedByAge + deletedByCount,
+            deletedEffects = deletedEffects
         )
     }
 }

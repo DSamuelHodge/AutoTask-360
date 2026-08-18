@@ -51,7 +51,7 @@ class RunCoordinatorTest {
 
         assertEquals(RunStatuses.PARTIAL, result.runs[0].run.status)
         assertEquals(listOf(StepStatuses.OK, StepStatuses.FAILED), result.runs[0].steps.map { it.status })
-        assertEquals(listOf("0:LOG", "1:HTTP"), env.calls)
+        assertEquals(listOf("0:LOG", "1:HTTP", "1:HTTP", "1:HTTP"), env.calls)
     }
 
     @Test
@@ -136,7 +136,7 @@ class RunCoordinatorTest {
     }
 
     @Test
-    fun interruptedNonIdempotentStepDoesNotReexecute() = runBlocking {
+    fun interruptedSmsReentersWithTheSameEffectId() = runBlocking {
         val env = harness(
             actions = """[{"type":"SEND_SMS","params":{"number":"+15551212","text":"hi"}},{"type":"LOG","params":{"message":"after"}}]"""
         )
@@ -156,27 +156,54 @@ class RunCoordinatorTest {
         )
 
         val recovered = env.coordinator.recoverIncomplete().single()
-        assertEquals(RunStatuses.INDETERMINATE, recovered.run.status)
-        assertEquals("resume_indeterminate", recovered.run.error)
-        assertEquals(StepStatuses.INDETERMINATE, recovered.steps.single().status)
-        assertEquals("effect-sms-1", recovered.steps.single().effectId)
-        assertTrue(env.calls.isEmpty())
+        assertEquals(RunStatuses.SUCCESS, recovered.run.status)
+        assertEquals("effect-sms-1", recovered.steps[0].effectId)
+        assertEquals("effect-sms-1", env.effectIds[0])
+        assertEquals(listOf("0:SEND_SMS", "1:LOG"), env.calls)
     }
 
     @Test
-    fun retryAfterIndeterminateStartsAFreshRun() = runBlocking {
-        val env = harness(actions = """[{"type":"SEND_SMS","params":{"number":"+15551212","text":"hi"}}]""")
+    fun interruptedCameraStepDoesNotReexecute() = runBlocking {
+        val env = harness(
+            actions = """[{"type":"CAMERA","params":{}},{"type":"LOG","params":{"message":"after"}}]"""
+        )
         val queued = env.dispatch(executeNow = false)
         val run = queued.runs[0].run.copy(status = RunStatuses.RUNNING, currentStepIndex = 0)
         env.store.updateRun(run)
         env.store.upsertStep(
             StepRun(
-                stepRunId = "step-sms",
+                stepRunId = "step-cam",
                 runId = run.runId,
                 stepIndex = 0,
-                type = "SEND_SMS",
+                type = "CAMERA",
                 status = StepStatuses.RUNNING,
-                effectId = "effect-sms-1",
+                effectId = "effect-cam-1",
+                startedAt = run.createdAt
+            )
+        )
+
+        val recovered = env.coordinator.recoverIncomplete().single()
+        assertEquals(RunStatuses.INDETERMINATE, recovered.run.status)
+        assertEquals("resume_indeterminate", recovered.run.error)
+        assertEquals(StepStatuses.INDETERMINATE, recovered.steps.single().status)
+        assertEquals("effect-cam-1", recovered.steps.single().effectId)
+        assertTrue(env.calls.isEmpty())
+    }
+
+    @Test
+    fun retryAfterIndeterminateStartsAFreshRun() = runBlocking {
+        val env = harness(actions = """[{"type":"CAMERA","params":{}}]""")
+        val queued = env.dispatch(executeNow = false)
+        val run = queued.runs[0].run.copy(status = RunStatuses.RUNNING, currentStepIndex = 0)
+        env.store.updateRun(run)
+        env.store.upsertStep(
+            StepRun(
+                stepRunId = "step-cam",
+                runId = run.runId,
+                stepIndex = 0,
+                type = "CAMERA",
+                status = StepStatuses.RUNNING,
+                effectId = "effect-cam-1",
                 startedAt = run.createdAt
             )
         )
@@ -187,8 +214,43 @@ class RunCoordinatorTest {
         assertNotEquals(crashed.run.runId, retry.runId)
         val executed = env.coordinator.execute(retry)
         assertEquals(RunStatuses.SUCCESS, executed.run.status)
-        assertEquals(listOf("0:SEND_SMS"), env.calls)
-        assertNotEquals("effect-sms-1", executed.steps.single().effectId)
+        assertEquals(listOf("0:CAMERA"), env.calls)
+        assertNotEquals("effect-cam-1", executed.steps.single().effectId)
+    }
+
+    @Test
+    fun retryableStepFailureRetriesSameEffectIdThenSucceeds() = runBlocking {
+        val env = harness(
+            actions = """[{"type":"HTTP","params":{"url":"https://example.invalid"}}]""",
+            httpFailuresBeforeOk = 2
+        )
+        val result = env.dispatch()
+        assertEquals(RunStatuses.SUCCESS, result.runs[0].run.status)
+        assertEquals(3, env.calls.size)
+        assertEquals(1, env.effectIds.toSet().size)
+        assertEquals(3, result.runs[0].steps.single().attempt)
+    }
+
+    @Test
+    fun retryableStepFailureExhaustsAttempts() = runBlocking {
+        val env = harness(actions = """[{"type":"HTTP","params":{"url":"https://example.invalid"}}]""")
+        val result = env.dispatch()
+        assertEquals(RunStatuses.FAILED, result.runs[0].run.status)
+        assertEquals(3, env.calls.size)
+        assertEquals(1, env.effectIds.toSet().size)
+        assertEquals(3, result.runs[0].steps.single().attempt)
+    }
+
+    @Test
+    fun validationFailureDoesNotRetry() = runBlocking {
+        val env = harness(
+            actions = """[{"type":"SEND_SMS","params":{"number":"","text":""}}]""",
+            failDetail = mapOf("SEND_SMS" to "SMS number and text required")
+        )
+        val result = env.dispatch()
+        assertEquals(RunStatuses.FAILED, result.runs[0].run.status)
+        assertEquals(1, env.calls.size)
+        assertEquals(1, result.runs[0].steps.single().attempt)
     }
 
     @Test
@@ -216,7 +278,7 @@ class RunCoordinatorTest {
 
         val executed = env.coordinator.execute(retry)
         assertEquals(RunStatuses.FAILED, executed.run.status)
-        assertEquals(2, env.calls.size)
+        assertEquals(6, env.calls.size)
     }
 
     @Test
@@ -296,7 +358,9 @@ class RunCoordinatorTest {
     private fun harness(
         actions: String,
         clock: () -> Long = { System.currentTimeMillis() },
-        scheduler: WakeScheduler = NoOpWakeScheduler
+        scheduler: WakeScheduler = NoOpWakeScheduler,
+        httpFailuresBeforeOk: Int = Int.MAX_VALUE,
+        failDetail: Map<String, String> = emptyMap()
     ): TestEnv {
         val store = InMemoryRunStore()
         val calls = mutableListOf<String>()
@@ -310,17 +374,30 @@ class RunCoordinatorTest {
             triggerConfigJson = "{}",
             actionsJson = actions
         )
+        var httpFailsLeft = httpFailuresBeforeOk
         val coordinator = RunCoordinator(
             store = store,
             runner = StepRunner { _, _, stepIndex, type, _, effectId ->
                 calls.add("$stepIndex:$type")
                 effectIds.add(effectId)
-                if (type == "HTTP") StepResult(stepIndex, type, "FAILED", "boom")
-                else StepResult(stepIndex, type, "OK", "ok")
+                failDetail[type]?.let { detail ->
+                    return@StepRunner StepResult(stepIndex, type, "FAILED", detail)
+                }
+                if (type == "HTTP") {
+                    if (httpFailsLeft > 0) {
+                        httpFailsLeft -= 1
+                        StepResult(stepIndex, type, "FAILED", "boom")
+                    } else {
+                        StepResult(stepIndex, type, "OK", "ok")
+                    }
+                } else {
+                    StepResult(stepIndex, type, "OK", "ok")
+                }
             },
             wakeScheduler = scheduler,
             loadProfile = { if (it == profile.id) profile else null },
-            clock = clock
+            clock = clock,
+            retrySleeper = { }
         )
         val watched = mutableListOf<String>()
         val dispatcher = EventDispatcher(

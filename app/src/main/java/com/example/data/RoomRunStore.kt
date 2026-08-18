@@ -1,6 +1,7 @@
 package com.example.data
 
 import com.example.domain.AutomationRun
+import com.example.domain.EffectRecord
 import com.example.domain.EventEnvelope
 import com.example.domain.StepRun
 import com.example.engine.RunStore
@@ -9,6 +10,7 @@ class RoomRunStore(database: AutoTaskDatabase) : RunStore {
     private val events = database.eventDao()
     private val runs = database.runDao()
     private val steps = database.stepDao()
+    private val effects = database.effectDao()
 
     override suspend fun insertEvent(event: EventEnvelope): Boolean {
         return events.insert(EventEnvelopeEntity.from(event)) != -1L
@@ -68,4 +70,11 @@ class RoomRunStore(database: AutoTaskDatabase) : RunStore {
 
     override suspend fun listSteps(runId: String): List<StepRun> =
         steps.listForRun(runId).map { it.toDomain() }
+
+    override suspend fun getEffect(effectId: String): EffectRecord? =
+        effects.getById(effectId)?.toDomain()
+
+    override suspend fun putEffect(record: EffectRecord) {
+        effects.upsert(EffectRecordEntity.from(record))
+    }
 }

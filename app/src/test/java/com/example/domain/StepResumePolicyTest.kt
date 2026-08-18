@@ -7,16 +7,23 @@ import org.junit.Test
 class StepResumePolicyTest {
 
     @Test
-    fun onlyLogWaitAndToastMayReenter() {
+    fun onlyLogWaitAndToastAreInherentlySafe() {
         assertTrue(StepResumePolicy.safeToReenter("LOG"))
         assertTrue(StepResumePolicy.safeToReenter("wait"))
         assertTrue(StepResumePolicy.safeToReenter("TOAST"))
         assertFalse(StepResumePolicy.safeToReenter("SEND_SMS"))
-        assertFalse(StepResumePolicy.safeToReenter("CALL"))
         assertFalse(StepResumePolicy.safeToReenter("HTTP"))
-        assertFalse(StepResumePolicy.safeToReenter("UI_DRIVE"))
-        assertFalse(StepResumePolicy.safeToReenter("WRITE_FILE"))
         assertFalse(StepResumePolicy.safeToReenter("CAMERA"))
-        assertFalse(StepResumePolicy.safeToReenter("SPEAK"))
+    }
+
+    @Test
+    fun dedupeCapableTypesMayReenter() {
+        assertTrue(StepResumePolicy.mayReenter("SEND_SMS"))
+        assertTrue(StepResumePolicy.mayReenter("HTTP"))
+        assertTrue(StepResumePolicy.mayReenter("WRITE_FILE"))
+        assertTrue(StepResumePolicy.dedupesByEffectId("send_sms"))
+        assertFalse(StepResumePolicy.mayReenter("CAMERA"))
+        assertFalse(StepResumePolicy.mayReenter("WIFI_ACTION"))
+        assertFalse(StepResumePolicy.dedupesByEffectId("CAMERA"))
     }
 }

@@ -21,5 +21,6 @@ data class RetentionReport(
     val deletedRuns: Int = 0,
     val deletedSteps: Int = 0,
     val deletedEvents: Int = 0,
-    val deletedLogs: Int = 0
+    val deletedLogs: Int = 0,
+    val deletedEffects: Int = 0
 )
