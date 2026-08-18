@@ -1,16 +1,18 @@
 # AutoTask360 runtime architecture specification
 
-Status: Proposed
+Status: Active — AutoTask360 2.0
 
 This specification defines the maintainable product architecture for AutoTask360. It separates the Android automation runtime from any Chief-of-Staff (CoS) agent, Mac harness, language model, CRM, or context service.
 
 ## 1. Decision
 
-AutoTask360 is an autonomous Android execution runtime. A CoS is an optional external controller that plans work, requests approval, invokes versioned commands, and observes results.
+AutoTask360 is an autonomous Android execution runtime. A Chief-of-Staff (CoS) is a privileged controller — on-device Rust brain, loopback client, or paired remote — that holds situational context, plans work, and invokes versioned commands. It is expected to act with higher autonomy than a typical chat agent: anticipate work, execute within policy, and escalate to a human only when the operator has required confirmation or a less-trusted client is calling.
+
+Human approval is a built-in facility of the runtime, not the default CoS execution path. Paired remotes and opted-in definitions can require stored `approvedActions` or an operator confirmation. Local-device and internal-brain principals execute after Android permissions and capability policy, without a per-action human prompt.
 
 The Android runtime remains useful without a CoS. It owns event delivery, scheduling, matching, capability policy, action execution, persistence, recovery, and audit history.
 
-The Mac harness, Codex, a cloud agent, and the on-device Rust brain are clients or optional context providers. They are not dependencies of the core automation engine and must not access its database or Android APIs directly.
+The Mac harness, Codex, a cloud agent, and the on-device Rust brain are clients or optional context providers. They are not dependencies of the core automation engine and must not access its database or Android APIs directly. The on-device brain is the intended high-privilege CoS; the Mac harness and LAN clients are optional remotes with narrower grants.
 
 ## 2. Goals
 
@@ -20,7 +22,8 @@ The Mac harness, Codex, a cloud agent, and the on-device Rust brain are clients 
 - Allow REST, MCP, UI, ContentProvider, and internal event sources to use the same behavior.
 - Make profiles typed, versioned, validated, and safely evolvable.
 - Support exact time triggers, flexible background schedules, and cron-like recurrence without a permanently running service.
-- Make high-risk capabilities explicit, scoped, auditable, and user-controlled.
+- Make high-risk capabilities explicit, scoped, auditable, and policy-gated.
+- Give the CoS a privileged, high-autonomy command path. Keep human approval available for remotes and operator-opted definitions.
 - Keep the runtime testable on the JVM wherever Android behavior is not required.
 
 ## 3. Non-goals
@@ -36,7 +39,7 @@ The Mac harness, Codex, a cloud agent, and the on-device Rust brain are clients 
 ```mermaid
 flowchart LR
     User["User or operator"]
-    Cos["Optional CoS controller<br/>Mac, cloud, or on-device"]
+    Cos["CoS controller<br/>on-device brain, loopback, or paired"]
     Context["Optional context systems<br/>CRM, calendar, messaging, LLM"]
 
     subgraph Phone["AutoTask360 Android runtime"]
@@ -79,10 +82,10 @@ flowchart LR
 | Rule evaluator | Trigger filters, conditions, cooldowns, profile selection | Android UI operations |
 | Run coordinator | Ordered steps, timeout, retry, checkpoint, cancellation | Network protocol handling |
 | Action registry | Action validation and execution adapters | Profile selection or CoS reasoning |
-| Capability policy | Permission, special-access, consent, and risk decisions | Credential storage or transport authentication |
+| Capability policy | Permission, special-access, consent, and risk decisions | Credential storage, transport authentication, or per-handler approval bypass |
 | Room database | Android automation state and audit history | Rust brain state |
 | MCP and REST adapters | Protocol translation and response formatting | Repository or executor orchestration |
-| CoS controller | Intent interpretation, planning, approvals, context lookup | Direct database or Android API access |
+| CoS controller | Situational context, planning, proactive command invocation, optional human escalation | Direct database or Android API access |
 
 ## 5. Application boundaries
 
@@ -147,6 +150,8 @@ AutomationDefinition {
 
 The external representation may remain JSON, but it must be parsed into typed models at the command boundary. Invalid trigger types, action types, parameters, and incompatible capabilities must fail validation before persistence.
 
+`ActionStep` carries `type` and `params` only. It does not carry an effect-id, idempotency key, or compensation token. Those belong on the run/step records and, when added, on the handler `execute` contract (§6.4).
+
 ### 6.2 Event envelope
 
 All event sources publish the same shape:
@@ -164,13 +169,43 @@ EventEnvelope {
 }
 ```
 
-The event identifier and dedupe key support replay protection and idempotent handling. Event payloads should use a canonical JSON representation rather than `Map<String, Any?>` at public boundaries.
+The event identifier and dedupe key support replay protection and idempotent admission. Event payloads should use a canonical JSON representation rather than `Map<String, Any?>` at public boundaries.
+
+Dispatch is serialized globally in-process. `EventDispatcher` holds a single mutex around admission, matching, run creation, and (when `executeNow`) step execution. One event is processed at a time. Matching order is enabled profiles for the trigger type, descending `priority`. The runtime does not partition by `automationId` and does not run two events concurrently inside one process. Same-profile races on shared state cannot occur during dispatch; they can occur only if a crash leaves a `RUNNING` step and `recoverIncomplete` re-enters it (§6.3). Tests for ordering and concurrent load cover FIFO admission, dedupe under contention, and queue-full rejection (`MAX_INCOMPLETE_EVENTS`), not parallel same-profile execution.
 
 ### 6.3 Run and step state
 
 Every requested execution receives a `runId`. Each step is durable and observable. A run must support `cancel`, `retry`, `resume`, and `getStatus` without requiring the original caller to remain connected.
 
+Run statuses: `QUEUED`, `RUNNING`, `WAITING`, `SUCCESS`, `PARTIAL`, `FAILED`, `CANCELLED`, `SKIPPED`.
+
+Step statuses: `PENDING`, `RUNNING`, `OK`, `SKIPPED`, `FAILED`, `WAITING`, `CANCELLED`.
+
+There is no `RETRYING` state. `retry` is allowed only on a terminal run and creates a new `runId` with `currentStepIndex = 0`, `attempt + 1`, and `retryOfRunId` pointing at the original. Max attempts default to 5.
+
+`resume` and crash recovery re-enter a non-terminal run at `currentStepIndex`. A step left in `RUNNING` is treated as incomplete and executed again. Delivery is at-least-once. There is no coordinator-level effect token: if the process dies after a non-idempotent side effect (SMS sent, call placed) but before the step is persisted as `OK`, resume will call the handler again. `requestRun` idempotency keys protect duplicate admission, not duplicate step execution.
+
+`WAIT` persists a continuation (`wakeAt`, `continuationJson`) and schedules a WorkManager wake. It does not hold a coroutine, foreground service, or process for the wait. On wake, the wait step is marked `OK` and execution continues at the next index.
+
 Long waits must persist a continuation and schedule a future wake-up. They must not hold a coroutine, foreground service, or process in memory for the duration of the wait.
+
+### 6.4 Action handler contract
+
+Handlers register by action type. The shipped interface is:
+
+```text
+ActionHandler {
+  type: String
+  timeoutMs: Long
+  metadata(): ActionMetadata        // risk, autonomy, requirements
+  capabilityDenial(context, params): String?
+  execute(request): StepResult
+}
+```
+
+Validation, required capabilities, timeout, and risk metadata live on the handler and schema, and are enforced by `ActionRegistry` and Capability Policy — not by each transport. `execute` is not required to be idempotent and does not receive an effect-id or resume token. Adding a handler must not require a central switch except registration.
+
+A later change should add an optional effect-id, or a fail-closed indeterminate step status, so crash-and-resume cannot double-fire SMS, calls, or other non-idempotent actions. That is a known correctness gap. Do not paper over it in individual handler implementations.
 
 ## 7. Command API
 
@@ -183,22 +218,27 @@ The facade should expose these stable operations:
 | `listAutomations` / `getAutomation` | Read definitions and revisions. |
 | `validateAutomation` | Validate without persistence or execution. |
 | `saveAutomation` / `patchAutomation` / `deleteAutomation` | Manage persistent definitions. |
-| `simulate` | Return matching profiles, policy decisions, and planned steps without side effects. |
+| `simulate` | Resolve matching profiles without side effects. Shipped as `dryRun=true` on `fireEvent` / `POST /v1/events` / `autotask.events.fire`. |
 | `requestRun` | Enqueue a run and return `runId`; support idempotency keys. |
 | `getRun` / `listRuns` | Observe aggregate and step state. |
-| `cancelRun` / `retryRun` | Control durable runs. |
+| `cancelRun` / `retryRun` / `resumeRun` | Control durable runs. |
 
 MCP tools and REST endpoints should map to these commands. MCP should not expose a second execution implementation.
 
+`simulate` / `dryRun` walks the command boundary only. It lists the targeted profile or enabled profiles for the trigger type and returns them as `plannedProfiles`. It does not persist an event, create a run, call `Matcher` filters, or invoke action handlers, including in no-op mode. Planned steps are those compiled from the definition when a client inspects the profile; they are not a live handler rehearsal. Policy decisions for a dry-run come from `describeCapabilities` and the definition's `riskPolicy`, not from executing handlers.
+
 The CoS workflow is:
 
-1. Read schema and capabilities.
-2. Validate the proposed automation.
-3. Request simulation.
-4. Ask the user for approval when policy requires it.
-5. Save or update the automation.
-6. Request a run with an idempotency key.
-7. Observe the run and respond to failure or approval states.
+1. Read schema and capabilities (device state, grants, policy gates).
+2. Use that context to anticipate and plan work.
+3. Validate the proposed automation.
+4. Simulate (`dryRun`) to confirm which profiles would match.
+5. Save or update the automation when the definition should persist.
+6. Request a run with an idempotency key. Local-device and internal-brain principals execute after Android permissions and capability policy. They do not wait on a human prompt. `riskPolicy.requireConfirmation` is persisted on the definition as the operator opt-in hook; 2.0 does not enforce it against the CoS path.
+7. Observe the run. Distinguish validation failure, unavailable capability, execution failure, and — for paired remotes or opted-in definitions — `APPROVAL_REQUIRED`.
+8. Escalate to the built-in human-approval facility when policy or the operator requires it; otherwise continue.
+
+Paired remotes remain on a narrower path: they must present stored `approvedActions` for high-risk types or receive `403 APPROVAL_REQUIRED` and must not execute.
 
 ## 8. Scheduling
 
@@ -210,7 +250,7 @@ Use the platform scheduler that matches the guarantee required:
 - Recalculate schedules after reboot, timezone changes, profile changes, and missed delivery.
 - Treat scheduler delivery as an event ingress concern; the scheduler does not execute profiles directly.
 
-The `SCHEDULE` schema must not claim cron support until schedule persistence, registration, delivery, timezone handling, and tests are implemented.
+The `SCHEDULE` schema documents the shipped 5-field cron grammar. Do not claim additional recurrence forms until persistence, registration, delivery, timezone handling, and tests cover them.
 
 ## 9. Persistence ownership
 
@@ -243,7 +283,7 @@ Release behavior must follow these rules:
 - Require explicit user pairing before LAN access.
 - Use separate credentials for external clients and internal brain IPC.
 - Scope credentials by operation: read, profile write, execute, UI control, and OTA.
-- Require confirmation or a stored policy for high-risk operations such as SMS, calls, UI driving, arbitrary HTTP, file writes, and OTA.
+- Require confirmation or a stored policy for high-risk operations issued by paired remotes, such as SMS, calls, UI driving, arbitrary HTTP, file writes, camera, and OTA. Local-device and internal-brain (CoS) callers execute those actions when Android permissions and capability policy allow; the runtime still records risk metadata and audit. Human approval is built in: pairing stores `approvedActions`, and a definition may set `riskPolicy.requireConfirmation`. 2.0 enforces stored approvals against `PAIRED_CLIENT` only.
 - Mark services and providers non-exported unless external access is required, and protect required exported surfaces with signature-level permissions where possible.
 - Disable cleartext network access in release builds unless a narrowly scoped exception is required.
 - Never include bearer tokens, message bodies, contact exports, or full screen dumps in routine logs.
@@ -284,7 +324,7 @@ Gate: no two processes write the same database file.
 
 ### PR 3: Type and compile automation definitions
 
-Implementation status: in progress at the source level. Typed definitions, compile-on-write, revision cache, and executor compile-on-read are in `app` packages. Build and contract gates remain pending until a Java 11+ runtime is available.
+Implementation status: shipped in AutoTask360 2.0. Typed definitions, compile-on-write, revision cache, and executor compile-on-read are in `app` packages.
 
 - Add schema-versioned typed definitions.
 - Replace public `Map<String, Any?>` and raw JSON strings at command boundaries.
@@ -297,22 +337,22 @@ Gate: malformed profiles cannot be persisted or reach the executor.
 
 ### PR 4: Add durable event and run execution
 
-Implementation status: in progress at the source level. Event envelopes, durable runs/steps, dedupe/idempotency, checkpointed execution, cancel/retry/resume, and persisted WAIT continuations are in `app` packages.
+Implementation status: shipped in AutoTask360 2.0. Event envelopes, durable runs/steps, dedupe/idempotency, globally serialized dispatch, checkpointed execution, cancel/retry/resume, and persisted WAIT continuations are in `app` packages.
 
 - Add event envelopes, run records, and step records.
 - Add bounded event dispatch and deduplication.
 - Add checkpointed execution, timeout, retry, cancellation, and resume.
 - Convert long waits into persisted continuations.
 
-Tests: process-death recovery, retry behavior, cancellation, duplicate events, ordering, partial failure, and concurrent event load.
+Tests: process-death recovery, retry-as-new-run, cancellation, duplicate events, global serial dispatch, partial failure, queue-full under concurrent admission, and at-least-once resume of `RUNNING` steps.
 
 Gate: an interrupted run can resume or reach a terminal state without manual database repair.
 
 ### PR 5: Split the action registry
 
-Implementation status: in progress at the source level. `ActionHandler` + `ActionRegistry` own execution, capability checks, timeout, and risk metadata. `ActionExecutor` is a compatibility coordinator.
+Implementation status: shipped in AutoTask360 2.0. `ActionHandler` + `ActionRegistry` own execution, capability checks, timeout, and risk metadata. `ActionExecutor` is a compatibility coordinator.
 
-- Define the action handler interface.
+- Define the action handler interface (`metadata`, `capabilityDenial`, `execute`).
 - Move device actions into capability-specific handlers.
 - Centralize validation, required capabilities, timeout, and risk metadata.
 - Keep `ActionExecutor` as a compatibility coordinator until all handlers migrate.
@@ -323,7 +363,7 @@ Gate: adding an action does not require modifying a central action switch except
 
 ### PR 6: Implement the schedule manager
 
-Implementation status: in progress at the source level. Schedule persistence, next-fire calculation, exact AlarmManager / flexible WorkManager drivers, and boot/timezone/missed-delivery reconciliation are in `app` packages. `SCHEDULE` now documents the supported 5-field cron grammar.
+Implementation status: shipped in AutoTask360 2.0. Schedule persistence, next-fire calculation, exact AlarmManager / flexible WorkManager drivers, and boot/timezone/missed-delivery reconciliation are in `app` packages. `SCHEDULE` documents the supported 5-field cron grammar.
 
 - Add schedule persistence and next-fire calculation.
 - Implement exact alarms and flexible WorkManager delivery.
@@ -336,13 +376,13 @@ Gate: every enabled schedule has an observable next-fire state and a tested reco
 
 ### PR 7: Harden external control
 
-Implementation status: in progress at the source level. Loopback is the default bind; LAN requires pairing. External `atc-` credentials are scoped and hashed; the internal `cos-` brain token is loopback-only. Rate limits, request size limits, idempotency keys, origin checks, redacted audit events, and remote high-risk approvals are in `app` packages.
+Implementation status: shipped in AutoTask360 2.0. Loopback is the default bind; LAN requires pairing. External `atc-` credentials are scoped and hashed; the internal `cos-` brain token is loopback-only. Rate limits, request size limits, idempotency keys, origin checks, redacted audit events, and remote high-risk approvals are in `app` packages. The CoS path is not gated by pairing `approvedActions`.
 
 - Default Ktor to loopback or disabled.
 - Add pairing and scoped credentials.
 - Separate internal brain IPC authentication.
 - Add rate limits, request size limits, idempotency, and audit fields.
-- Restrict high-risk commands by policy and approval state.
+- Restrict high-risk commands from paired remotes by policy and stored approval state. The CoS path remains privileged.
 
 Tests: authorization matrix, replay and idempotency tests, malformed input tests, rate limiting, origin handling, and release-manifest checks.
 
@@ -395,10 +435,11 @@ Gate: an unauthenticated or under-scoped client cannot read or execute protected
 ### Documentation and operations
 
 - [ ] Document the command contract and versioning policy.
-- [ ] Document the CoS integration sequence.
+- [x] Document the CoS integration sequence.
 - [x] Document development access through `adb forward`.
 - [x] Document release and LAN security modes.
 - [ ] Add a troubleshooting guide for scheduler, permissions, and run recovery.
+- [ ] Add step-level handler idempotency (effect-id or fail-indeterminate) for crash-and-resume.
 
 ## 13. Test coverage plan
 
@@ -411,7 +452,7 @@ Gate: an unauthenticated or under-scoped client cannot read or execute protected
 | MCP and REST | Tool schemas, request mapping, status codes, error shapes, compatibility | Contract tests |
 | Persistence | Migrations, revisions, transactions, run state, database ownership | Room/integration tests |
 | Event ingress | Normalization, dedupe, coalescing, correlation IDs | JVM and Android tests |
-| Run coordinator | Ordering, retry, timeout, cancellation, resume, partial failure | JVM integration tests |
+| Run coordinator | Global serial dispatch, retry-as-new-run, timeout, cancellation, at-least-once resume, partial failure | JVM integration tests |
 | Action handlers | Capability gates and handler behavior | JVM tests plus instrumentation |
 | Scheduling | Next occurrence, timezone, DST, reboot, missed delivery | JVM plus Android integration |
 | Security | Scope matrix, pairing, replay, request limits, redaction | Integration/security tests |
@@ -444,7 +485,7 @@ Minimum regression coverage before PR 1 merges:
 - [ ] Database migrations are tested from the previous released schema.
 - [ ] A killed process can recover queued and running work.
 - [ ] Reboot and timezone changes preserve enabled schedules.
-- [ ] High-risk actions require the expected permission and approval state.
+- [ ] High-risk actions require the expected permission. Paired remotes also require stored approval state; the CoS path does not.
 - [ ] Release builds do not expose an unauthenticated LAN server.
 - [ ] Release builds do not share a database file with the Rust brain.
 - [ ] Sensitive request and execution data is redacted from logs.
@@ -469,7 +510,7 @@ This architecture is considered implemented when:
 4. A process interruption does not silently lose a durable run.
 5. The scheduler survives reboot and timezone changes.
 6. Room and the Rust brain have independent database ownership.
-7. High-risk actions are blocked without the required capability and approval.
+7. High-risk actions are blocked without the required capability. Paired remotes also require stored approval state. The CoS path is not blocked by the remote approval gate.
 8. The test and release gates in this document pass.
 
 ## 16. Open decisions before execution
@@ -477,7 +518,8 @@ This architecture is considered implemented when:
 - [x] Select Kotlin serialization or another canonical typed representation. PR 3 uses typed Kotlin data classes plus an explicit JSON codec in `com.example.domain`; Moshi remains available for HTTP clients, and module extraction is deferred until the command contracts stabilize.
 - [x] Decide whether the first implementation remains in `app` packages or extracts Gradle modules immediately.
 - [x] Define the supported cron grammar and timezone semantics. PR 6 uses 5-field cron (`minute hour day-of-month month day-of-week`) with `*`, lists, ranges, and steps; optional IANA `timezone` on TIME/SCHEDULE/SUNRISE_SUNSET (device zone by default). DST gaps skip to the next valid local time; overlaps use the first occurrence.
-- [x] Define the approval model for high-risk actions. PR 7 requires paired remote clients to present stored `approvedActions` for `confirm_required` or elevated-risk types (SMS, call, UI drive, HTTP, file write, camera). Missing approvals return `APPROVAL_REQUIRED` and do not execute. On-device and internal-brain callers are unchanged.
+- [x] Define the approval model for high-risk actions. Human approval is built in and available: pairing stores `approvedActions`; missing grants for `PAIRED_CLIENT` return `APPROVAL_REQUIRED` and do not execute; a definition may persist `riskPolicy.requireConfirmation` as the operator opt-in hook. The CoS (`INTERNAL_BRAIN`, `LOCAL_DEVICE`) is a privileged, high-autonomy principal — it is not gated by `approvedActions` or `requireConfirmation` in 2.0. It executes after Android permissions and capability policy, with audit. The product intent is a situational, anticipatory CoS, not a per-action permission-begging agent.
+- [ ] Add step-level idempotency (effect-id or fail-indeterminate) so crash-and-resume cannot double-execute non-idempotent handlers.
 - [ ] Define retention limits for events, runs, and execution logs.
 - [x] Define the external pairing and credential-rotation flow. PR 7: loopback `POST /v1/pairing/start` issues a 6-digit code; `complete` returns an `atc-` token once and stores only the SHA-256 hash plus scopes. LAN bind is off until a live credential exists. Revoke invalidates the hash. The `cos-` brain token never authorizes LAN.
 - [ ] Decide which context data, if any, crosses the Android/Rust brain boundary.
