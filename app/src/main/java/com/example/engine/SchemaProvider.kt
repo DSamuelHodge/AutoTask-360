@@ -68,6 +68,8 @@ object SchemaProvider {
         add("pairingCredentials", "GET", "/v1/pairing/credentials", "LOOPBACK", "List hashed paired credentials")
         add("pairingRevoke", "POST", "/v1/pairing/revoke", "LOOPBACK", "Revoke a paired credential")
         add("pairingLan", "POST", "/v1/pairing/lan", "LOOPBACK", "Enable LAN bind after a live credential exists")
+        add("watch", "GET", "http://127.0.0.1:8787/v1/watch", "LOOPBACK", "Recent event and terminal-run facts for CoS watch")
+        add("watchStream", "GET", "http://127.0.0.1:8787/v1/watch/stream", "LOOPBACK", "SSE stream of watch facts; replay then live")
         add("brainStatus", "GET", "/v1/brain/status", "READ", "Rust brain supervisor health")
         add("brain", "POST", "/v1/brain", "EXECUTE", "Proxy JSON-RPC to the internal brain socket")
         add("http", "POST", "/v1/http", "EXECUTE", "Outbound HTTP proxy; high risk")

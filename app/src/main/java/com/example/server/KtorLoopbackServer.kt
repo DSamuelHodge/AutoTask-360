@@ -166,6 +166,7 @@ class KtorLoopbackServer(
                     json.put("ktor_server_port", statusMap["ktor_server_port"])
                     json.put("ktor_server_running", statusMap["ktor_server_running"])
                     json.put("listener_port", statusMap["listener_port"])
+                    json.put("watch_running", statusMap["watch_running"])
                     json.put("last_server_error", statusMap["last_server_error"])
                     json.put("last_server_result", statusMap["last_server_result"])
                     json.put("notification_policy_declared", statusMap["notification_policy_declared"])

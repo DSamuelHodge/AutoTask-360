@@ -31,7 +31,8 @@ class EventDispatcher(
     private val insertLog: suspend (ExecutionLog) -> Long = { 0L },
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val idFactory: () -> String = { UUID.randomUUID().toString() },
-    private val maxIncompleteEvents: Int = RunCoordinator.MAX_INCOMPLETE_EVENTS
+    private val maxIncompleteEvents: Int = RunCoordinator.MAX_INCOMPLETE_EVENTS,
+    private val onDispatch: (DispatchResult) -> Unit = {}
 ) {
     private val mutex = Mutex()
 
@@ -42,6 +43,17 @@ class EventDispatcher(
         evaluateCooldown: Boolean = true,
         evaluateTriggerConfig: Boolean = true
     ): DispatchResult = mutex.withLock {
+        dispatchLocked(event, targetProfileId, executeNow, evaluateCooldown, evaluateTriggerConfig)
+            .also { onDispatch(it) }
+    }
+
+    private suspend fun dispatchLocked(
+        event: EventEnvelope,
+        targetProfileId: String?,
+        executeNow: Boolean,
+        evaluateCooldown: Boolean,
+        evaluateTriggerConfig: Boolean
+    ): DispatchResult {
         val existingById = store.getEvent(event.eventId)
         if (existingById != null) {
             val runs = store.listRunsForEvent(event.eventId).map { run ->

@@ -14,6 +14,7 @@ import com.example.application.AutoTaskRuntime
 import com.example.application.AutomationCommandFacade
 import com.example.server.KtorLoopbackServer
 import com.example.server.KtorServerConfig
+import com.example.server.WatchLoopbackServer
 
 class AutoTaskService : Service() {
 
@@ -60,6 +61,7 @@ class AutoTaskService : Service() {
 
     private val binder = LocalBinder()
     private var ktorServer: KtorLoopbackServer? = null
+    private var watchServer: WatchLoopbackServer? = null
     private var receivers: SystemEventReceivers? = null
     private lateinit var commands: AutomationCommandFacade
 
@@ -106,6 +108,8 @@ class AutoTaskService : Service() {
     override fun onDestroy() {
 
         receivers?.unregister()
+        watchServer?.stop()
+        watchServer = null
         ktorServer?.stop()
         KtorServerConfig.markStopped(this)
         commands.setRunningState(false)
@@ -116,6 +120,8 @@ class AutoTaskService : Service() {
     private fun restartKtorServerInternal() {
         ktorServer?.stop()
         ktorServer = null
+        watchServer?.stop()
+        watchServer = null
         KtorServerConfig.markStopped(this, "Restarting")
         startKtorServer()
     }
@@ -131,10 +137,21 @@ class AutoTaskService : Service() {
             ktorServer = KtorLoopbackServer(this, port)
             ktorServer?.start()
             KtorServerConfig.markStarted(this, port)
+            startWatchServer()
         } catch (e: Exception) {
             ktorServer = null
             val message = e.localizedMessage ?: e.javaClass.simpleName
             KtorServerConfig.markFailed(this, message)
+            e.printStackTrace()
+        }
+    }
+
+    private fun startWatchServer() {
+        try {
+            watchServer = WatchLoopbackServer()
+            watchServer?.start()
+        } catch (e: Exception) {
+            watchServer = null
             e.printStackTrace()
         }
     }

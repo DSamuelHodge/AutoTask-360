@@ -14,7 +14,7 @@ The Android runtime remains useful without a CoS. It owns event delivery, schedu
 
 The Mac harness, Codex, a cloud agent, and the on-device Rust brain are clients or optional context providers. They are not dependencies of the core automation engine and must not access its database or Android APIs directly. The on-device brain is the intended high-privilege CoS; the Mac harness and LAN clients are optional remotes with narrower grants.
 
-The CoS product is situational awareness plus actuation, not a chat wrapper. It watches (SMS, calls, calendar, CRM, location), anticipates (briefings, travel, deal context), and acts through AutoTask (`requestRun`, saved profiles, `aware.*` tools). Human approval is available for remotes and for operator-opted definitions. The CoS itself is not gated per action. Persistence is split on purpose: `cos.db` holds memory and relationships; `autotask.db` holds definitions, runs, and audit. They meet only over versioned RPC.
+The CoS product is situational awareness plus actuation, not a chat wrapper. It watches (SMS, calls, calendar, CRM, location), anticipates (briefings, travel, deal context), and acts through AutoTask (`requestRun`, saved profiles, `aware.*` tools). Human approval is available for remotes and for operator-opted definitions. The CoS itself is not gated per action. Persistence is split on purpose: `cos.db` holds memory and relationships; `autotask.db` holds definitions, runs, and audit. They meet only over versioned RPC. AutoTask also publishes a loopback **watch** stream on port 8787 (`GET /v1/watch`, SSE `/v1/watch/stream`): admitted events and terminal runs, including `INDETERMINATE`. Command remains on 8788. Termux Open Interpreter and the Rust brain subscribe; they do not poll Room.
 
 ## 2. Goals
 

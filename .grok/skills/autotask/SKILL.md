@@ -23,7 +23,9 @@ unless the user asked for it.
 ```bash
 adb devices -l
 adb -s <serial> forward tcp:8788 tcp:8788
+adb -s <serial> forward tcp:8787 tcp:8787
 curl -sS http://127.0.0.1:8788/v1/status
+curl -sS http://127.0.0.1:8787/v1/watch
 ```
 
 `GET /v1/status` must report `"version": "2.0"`. If it does not, stop and say

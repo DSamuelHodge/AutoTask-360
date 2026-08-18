@@ -41,3 +41,5 @@ Startup order: `AutoTaskApplication` → `AutoTaskRuntime.start()` → recover i
 ## Server
 
 Loopback `127.0.0.1:8788` after `adb forward`. `GET /v1/status` must report `"version": "2.0"` and `ktor_server_running: true`. LAN needs pairing; the `cos-` brain token is rejected on LAN.
+
+Watch is a second loopback server on **8787**. `GET /v1/watch` returns recent facts; `GET /v1/watch/stream` is SSE. The command server will not bind 8787. If `watch_running` is false on `/v1/status`, the service failed to bind the listener (another process on 8787).

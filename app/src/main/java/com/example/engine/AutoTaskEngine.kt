@@ -34,7 +34,7 @@ class AutoTaskEngine private constructor(
             executor.executeStep(stepIndex, type, params, profile, event, effectId)
         },
         wakeScheduler = WorkManagerWakeScheduler(context.applicationContext),
-        onTerminal = { run, _, profile, _ ->
+        onTerminal = { run, steps, profile, _ ->
             if (run.status == RunStatuses.SUCCESS ||
                 run.status == RunStatuses.PARTIAL ||
                 run.status == RunStatuses.FAILED ||
@@ -42,6 +42,7 @@ class AutoTaskEngine private constructor(
             ) {
                 repository.profileDao.updateLastTriggeredAt(profile.id, run.finishedAt ?: run.updatedAt)
             }
+            WatchPublisher.publishRun(run, steps)
         },
         loadProfile = { repository.getProfileById(it) }
     )
@@ -51,7 +52,8 @@ class AutoTaskEngine private constructor(
         loadEnabled = { repository.profileDao.getEnabledProfilesForTrigger(it) },
         loadProfile = { repository.getProfileById(it) },
         deviceState = { collectCurrentDeviceState() },
-        insertLog = { repository.insertLog(it) }
+        insertLog = { repository.insertLog(it) },
+        onDispatch = { WatchPublisher.publishDispatch(it) }
     )
     val scheduleManager = ScheduleManager(
         store = RoomScheduleStore(AutoTaskDatabase.getInstance(context)),
@@ -136,7 +138,11 @@ class AutoTaskEngine private constructor(
         }
     }
 
-    suspend fun cancelRun(runId: String): RunSnapshot = coordinator.cancel(runId)
+    suspend fun cancelRun(runId: String): RunSnapshot {
+        val snap = coordinator.cancel(runId)
+        WatchPublisher.publishRun(snap.run, snap.steps)
+        return snap
+    }
 
     suspend fun retryRun(runId: String): RunSnapshot {
         val retry = coordinator.retry(runId)

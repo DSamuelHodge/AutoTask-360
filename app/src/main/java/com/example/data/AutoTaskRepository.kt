@@ -71,6 +71,7 @@ class AutoTaskRepository(context: Context) {
             "ktor_server_port" to serverConfig.port,
             "ktor_server_running" to serverConfig.isRunning,
             "listener_port" to serverConfig.listenerPort,
+            "watch_running" to com.example.server.WatchLoopbackServer.isRunning,
             "last_server_error" to serverConfig.lastError,
             "last_server_result" to serverConfig.lastResult,
             "notification_policy_declared" to (permissionSummary["notification_policy_declared"] ?: false),

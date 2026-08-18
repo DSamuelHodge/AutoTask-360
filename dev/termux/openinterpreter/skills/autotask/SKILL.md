@@ -38,6 +38,15 @@ One profile: `triggerType=MANUAL` + `profileId`. Judge success from the run, not
 
 Also: `GET /v1/schedules`, `POST /v1/runs/{id}/cancel|retry|resume`.
 
+Watch (loopback 8787, not 8788):
+
+```bash
+curl -sS http://127.0.0.1:8787/v1/watch
+curl -N http://127.0.0.1:8787/v1/watch/stream
+```
+
+Facts are `event` / `event.deduped` / `run` (including `INDETERMINATE`). Command stays on 8788.
+
 ## Confirm first
 
 SMS, call, WhatsApp send, UI drive, HTTP, file write, camera, OTA, contacts, screen.

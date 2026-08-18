@@ -39,6 +39,7 @@ class RunCoordinatorTest {
         assertEquals(RunStatuses.SUCCESS, result.runs[0].run.status)
         assertEquals(listOf("0:LOG", "1:TOAST"), env.calls)
         assertEquals(listOf(StepStatuses.OK, StepStatuses.OK), result.runs[0].steps.map { it.status })
+        assertEquals(1, env.watched.size)
     }
 
     @Test
@@ -321,14 +322,16 @@ class RunCoordinatorTest {
             loadProfile = { if (it == profile.id) profile else null },
             clock = clock
         )
+        val watched = mutableListOf<String>()
         val dispatcher = EventDispatcher(
             store = store,
             coordinator = coordinator,
             loadEnabled = { if (it == "MANUAL") listOf(profile) else emptyList() },
             loadProfile = { if (it == profile.id) profile else null },
-            clock = clock
+            clock = clock,
+            onDispatch = { watched += it.event.eventId }
         )
-        return TestEnv(profileId, store, coordinator, dispatcher, calls, effectIds)
+        return TestEnv(profileId, store, coordinator, dispatcher, calls, effectIds, watched)
     }
 
     private data class TestEnv(
@@ -337,7 +340,8 @@ class RunCoordinatorTest {
         val coordinator: RunCoordinator,
         val dispatcher: EventDispatcher,
         val calls: MutableList<String>,
-        val effectIds: MutableList<String>
+        val effectIds: MutableList<String>,
+        val watched: MutableList<String>
     ) {
         suspend fun dispatch(executeNow: Boolean = true) = dispatcher.dispatch(
             EventEnvelope.create(type = "MANUAL", payload = mapOf("profileId" to profileId)),
