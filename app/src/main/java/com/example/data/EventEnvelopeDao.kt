@@ -18,4 +18,16 @@ interface EventEnvelopeDao {
 
     @Query("SELECT * FROM event_envelopes WHERE idempotencyKey = :key LIMIT 1")
     suspend fun getByIdempotencyKey(key: String): EventEnvelopeEntity?
+
+    @Query(
+        """
+        DELETE FROM event_envelopes
+        WHERE receivedAt < :cutoffMs
+          AND eventId NOT IN (
+            SELECT eventId FROM automation_runs
+            WHERE status IN ('QUEUED', 'RUNNING', 'WAITING')
+          )
+        """
+    )
+    suspend fun deleteOrphansOlderThan(cutoffMs: Long): Int
 }

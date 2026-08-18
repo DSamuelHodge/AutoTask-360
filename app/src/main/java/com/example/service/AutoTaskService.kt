@@ -10,6 +10,7 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import com.example.application.AutoTaskRuntime
 import com.example.application.AutomationCommandFacade
 import com.example.server.KtorLoopbackServer
 import com.example.server.KtorServerConfig
@@ -69,6 +70,7 @@ class AutoTaskService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        AutoTaskRuntime.start(this)
         commands = AutomationCommandFacade.getInstance(this)
 
         startKtorServer()

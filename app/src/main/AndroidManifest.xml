@@ -67,6 +67,7 @@
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
     <application
+        android:name=".application.AutoTaskApplication"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"

@@ -34,4 +34,13 @@ interface AutomationRunDao {
 
     @Query("SELECT COUNT(*) FROM automation_runs WHERE status IN ('QUEUED', 'RUNNING', 'WAITING')")
     suspend fun incompleteRunCount(): Int
+
+    @Query(
+        """
+        DELETE FROM automation_runs
+        WHERE status NOT IN ('QUEUED', 'RUNNING', 'WAITING')
+          AND createdAt < :cutoffMs
+        """
+    )
+    suspend fun deleteTerminalOlderThan(cutoffMs: Long): Int
 }

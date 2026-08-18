@@ -22,4 +22,19 @@ interface ExecutionLogDao {
 
     @Query("DELETE FROM execution_logs")
     suspend fun clearLogs(): Int
+
+    @Query("DELETE FROM execution_logs WHERE timestamp < :cutoffMs")
+    suspend fun deleteOlderThan(cutoffMs: Long): Int
+
+    @Query(
+        """
+        DELETE FROM execution_logs
+        WHERE id NOT IN (
+            SELECT id FROM (
+                SELECT id FROM execution_logs ORDER BY timestamp DESC LIMIT :keep
+            )
+        )
+        """
+    )
+    suspend fun trimToNewest(keep: Int): Int
 }

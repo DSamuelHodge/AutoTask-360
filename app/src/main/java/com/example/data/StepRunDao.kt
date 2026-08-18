@@ -15,4 +15,7 @@ interface StepRunDao {
 
     @Query("SELECT * FROM step_runs WHERE runId = :runId AND stepIndex = :stepIndex LIMIT 1")
     suspend fun getByIndex(runId: String, stepIndex: Int): StepRunEntity?
+
+    @Query("DELETE FROM step_runs WHERE runId NOT IN (SELECT runId FROM automation_runs)")
+    suspend fun deleteOrphans(): Int
 }

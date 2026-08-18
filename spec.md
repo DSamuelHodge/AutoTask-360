@@ -14,6 +14,8 @@ The Android runtime remains useful without a CoS. It owns event delivery, schedu
 
 The Mac harness, Codex, a cloud agent, and the on-device Rust brain are clients or optional context providers. They are not dependencies of the core automation engine and must not access its database or Android APIs directly. The on-device brain is the intended high-privilege CoS; the Mac harness and LAN clients are optional remotes with narrower grants.
 
+The CoS product is situational awareness plus actuation, not a chat wrapper. It watches (SMS, calls, calendar, CRM, location), anticipates (briefings, travel, deal context), and acts through AutoTask (`requestRun`, saved profiles, `aware.*` tools). Human approval is available for remotes and for operator-opted definitions. The CoS itself is not gated per action. Persistence is split on purpose: `cos.db` holds memory and relationships; `autotask.db` holds definitions, runs, and audit. They meet only over versioned RPC.
+
 ## 2. Goals
 
 - Provide one command boundary for the Android automation product.
@@ -124,7 +126,7 @@ The implementation should move toward these packages or Gradle modules. The firs
   Rust brain IPC, CRM, WhatsApp, calendar, and other context integrations
 ```
 
-The runtime should use an application-scoped dependency container instead of a global singleton with startup side effects. `AutoTaskEngine` can remain the migration facade while construction moves into explicit dependencies.
+`AutoTaskApplication` owns process startup. `AutoTaskRuntime.start()` is the only place that seeds defaults, recovers incomplete runs, reconciles schedules, and prunes history. `AutoTaskEngine.getInstance` remains a migration facade; constructing it has no startup side effects.
 
 ## 6. Core contracts
 
@@ -404,7 +406,7 @@ Gate: an unauthenticated or under-scoped client cannot read or execute protected
 - [x] Remove transport-specific orchestration.
 - [x] Give Room and Rust independent database paths.
 - [x] Add a read-only legacy database import path.
-- [ ] Replace singleton startup side effects with explicit application wiring.
+- [x] Replace singleton startup side effects with explicit application wiring.
 - [ ] Keep CoS, MCP, CRM, WhatsApp, and brain integrations outside the core runtime.
 
 ### Data and execution
@@ -417,6 +419,7 @@ Gate: an unauthenticated or under-scoped client cannot read or execute protected
 - [x] Add durable runs and step runs.
 - [x] Add retry, timeout, cancellation, and resume semantics.
 - [x] Add persisted continuations for long waits.
+- [x] Add retention limits for events, runs, and execution logs.
 
 ### Scheduling
 
@@ -444,7 +447,7 @@ Gate: an unauthenticated or under-scoped client cannot read or execute protected
 - [x] Document the CoS integration sequence.
 - [x] Document development access through `adb forward`.
 - [x] Document release and LAN security modes.
-- [ ] Add a troubleshooting guide for scheduler, permissions, and run recovery.
+- [x] Add a troubleshooting guide for scheduler, permissions, and run recovery.
 - [x] Add step-level handler idempotency (effect-id or fail-indeterminate) for crash-and-resume.
 
 ## 13. Test coverage plan
@@ -526,6 +529,6 @@ This architecture is considered implemented when:
 - [x] Define the supported cron grammar and timezone semantics. PR 6 uses 5-field cron (`minute hour day-of-month month day-of-week`) with `*`, lists, ranges, and steps; optional IANA `timezone` on TIME/SCHEDULE/SUNRISE_SUNSET (device zone by default). DST gaps skip to the next valid local time; overlaps use the first occurrence.
 - [x] Define the approval model for high-risk actions. Human approval is built in and available: pairing stores `approvedActions`; missing grants for `PAIRED_CLIENT` return `APPROVAL_REQUIRED` and do not execute; a definition may persist `riskPolicy.requireConfirmation` as the operator opt-in hook. The CoS (`INTERNAL_BRAIN`, `LOCAL_DEVICE`) is a privileged, high-autonomy principal — it is not gated by `approvedActions` or `requireConfirmation` in 2.0. It executes after Android permissions and capability policy, with audit. The product intent is a situational, anticipatory CoS, not a per-action permission-begging agent.
 - [x] Add step-level idempotency (effect-id or fail-indeterminate) so crash-and-resume cannot double-execute non-idempotent handlers. 2.0 writes `effectId` on `RUNNING` admission. Safe types (`LOG`, `WAIT`, `TOAST`) re-enter with the same id. All other types become `INDETERMINATE` and do not execute again. Explicit `retry` is a new run.
-- [ ] Define retention limits for events, runs, and execution logs.
+- [x] Define retention limits for events, runs, and execution logs. Terminal runs, orphan events, and execution logs older than 14 days are pruned on `AutoTaskRuntime.start()`. Logs are also capped at 500 newest rows. Incomplete runs (`QUEUED` / `RUNNING` / `WAITING`) are never pruned.
 - [x] Define the external pairing and credential-rotation flow. PR 7: loopback `POST /v1/pairing/start` issues a 6-digit code; `complete` returns an `atc-` token once and stores only the SHA-256 hash plus scopes. LAN bind is off until a live credential exists. Revoke invalidates the hash. The `cos-` brain token never authorizes LAN.
-- [ ] Decide which context data, if any, crosses the Android/Rust brain boundary.
+- [x] Decide which context data, if any, crosses the Android/Rust brain boundary. The brain never reads `autotask.db`. Crossing is explicit versioned RPC only (`POST /v1/brain`, `aware.*` / `crm.*` tools, `/v1/http`, `/v1/location`). Allowed: the fields on that RPC (sender, number, destination, owner id, and other method params), last-known lat/lng when travel asks, and contact fields the operator opted to sync. Forbidden: Room files and handles, run/step rows, credentials, tokens, unbounded table dumps, raw screen buffers, and full message bodies in routine logs. The CoS plans and remembers in `cos.db`; AutoTask executes and audits in `autotask.db`.

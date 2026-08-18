@@ -6,6 +6,7 @@ import androidx.core.content.ContextCompat
 import com.example.data.AutoTaskDatabase
 import com.example.data.AutoTaskRepository
 import com.example.data.ExecutionLog
+import com.example.data.RetentionSweeper
 import com.example.data.RoomRunStore
 import com.example.data.RoomScheduleStore
 import com.example.domain.EventEnvelope
@@ -80,43 +81,18 @@ class AutoTaskEngine private constructor(
 
     init {
         repository.onProfileMutated = { profileId -> syncSchedule(profileId) }
-        scope.launch {
-            repository.seedDefaultRecipesIfNeeded()
-            coordinator.recoverIncomplete()
-            scheduleManager.reconcile("startup")
-        }
-        // One-shot location warm-up: the LocationManager only serves
-        // getLastKnownLocation to apps that have (recently) been active
-        // consumers. A single passive request makes the cached fix visible to
-        // /v1/location (used by the brain's travel/commute inference).
-        try {
-            val lm = context.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
-            val ok = androidx.core.content.ContextCompat.checkSelfPermission(
-                context, android.Manifest.permission.ACCESS_FINE_LOCATION
-            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            if (ok && (lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER) ||
-                        lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER))) {
-                val locListener = object : android.location.LocationListener {
-                    override fun onLocationChanged(location: android.location.Location) {}
-                    override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
-                    override fun onProviderEnabled(provider: String) {}
-                    override fun onProviderDisabled(provider: String) {}
-                }
-                val provider = if (lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)) {
-                    android.location.LocationManager.NETWORK_PROVIDER
-                } else {
-                    android.location.LocationManager.GPS_PROVIDER
-                }
-                scope.launch {
-                    kotlinx.coroutines.delay(1000)
-                    try {
-                        lm.requestLocationUpdates(provider, 0L, 0f, locListener, android.os.Looper.getMainLooper())
-                        kotlinx.coroutines.delay(3000)
-                        lm.removeUpdates(locListener)
-                    } catch (_: Exception) {}
-                }
-            }
-        } catch (_: Exception) {}
+    }
+
+    /**
+     * Explicit startup. Must be called from [com.example.application.AutoTaskRuntime];
+     * constructing the engine no longer seeds, recovers, or prunes.
+     */
+    suspend fun start() {
+        repository.seedDefaultRecipesIfNeeded()
+        coordinator.recoverIncomplete()
+        scheduleManager.reconcile("startup")
+        RetentionSweeper(AutoTaskDatabase.getInstance(context)).prune()
+        warmLocation()
     }
 
     suspend fun processEvent(event: AutomationEvent): List<ExecutionLog> {
@@ -201,6 +177,42 @@ class AutoTaskEngine private constructor(
             ),
             targetProfileId = fire.profileId
         )
+    }
+
+    private fun warmLocation() {
+        try {
+            val lm = context.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+            val ok = ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.ACCESS_FINE_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!ok) return
+            if (!lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER) &&
+                !lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER)
+            ) {
+                return
+            }
+            val locListener = object : android.location.LocationListener {
+                override fun onLocationChanged(location: android.location.Location) {}
+                override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
+                override fun onProviderEnabled(provider: String) {}
+                override fun onProviderDisabled(provider: String) {}
+            }
+            val provider = if (lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)) {
+                android.location.LocationManager.NETWORK_PROVIDER
+            } else {
+                android.location.LocationManager.GPS_PROVIDER
+            }
+            scope.launch {
+                kotlinx.coroutines.delay(1000)
+                try {
+                    lm.requestLocationUpdates(provider, 0L, 0f, locListener, android.os.Looper.getMainLooper())
+                    kotlinx.coroutines.delay(3000)
+                    lm.removeUpdates(locListener)
+                } catch (_: Exception) {
+                }
+            }
+        } catch (_: Exception) {
+        }
     }
 
     private fun lastKnownLocation(): GeoPoint? {
