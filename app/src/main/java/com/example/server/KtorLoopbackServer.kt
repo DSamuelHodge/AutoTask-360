@@ -3,6 +3,7 @@ package com.example.server
 import android.content.Context
 import com.example.application.AutomationCommandFacade
 import com.example.application.ProfileNotFoundException
+import com.example.domain.ProfileListQuery
 import com.example.domain.RunNotFoundException
 import com.example.domain.ScheduleNotFoundException
 import com.example.security.AccessDeniedException
@@ -201,7 +202,16 @@ class KtorLoopbackServer(
 
                 // GET /v1/profiles
                 get("/v1/profiles") {
-                    val profiles = commands.listProfiles()
+                    val params = call.request.queryParameters
+                    val query = ProfileListQuery(
+                        q = params["q"] ?: params["search"],
+                        id = params["id"],
+                        actionType = params["actionType"] ?: params["action"],
+                        triggerType = params["triggerType"] ?: params["trigger"],
+                        enabled = params["enabled"]?.toBooleanStrictOrNull(),
+                        limit = params["limit"]?.toIntOrNull()
+                    )
+                    val profiles = commands.listProfiles(query)
                     val arr = JSONArray()
                     profiles.forEach { p ->
                         arr.put(AutomationCommandFacade.profileToJson(p))

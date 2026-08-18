@@ -34,7 +34,19 @@ object SchemaProvider {
         add("status", "GET", "/v1/status", "READ", "Engine, bind mode, counts, product version, uptime")
         add("schema", "GET", "/v1/schema", "READ", "Triggers, actions, endpoints, and template variables")
         add("capabilities", "GET", "/v1/capabilities", "READ", "Live permissions, special access, and agent policy")
-        add("profiles", "GET", "/v1/profiles", "READ", "List automation profiles")
+        add("profiles", "GET", "/v1/profiles", "READ", "List or resolve automation profiles") {
+            put(
+                "query",
+                JSONObject()
+                    .put("q", "Free-text intent (sms, morning brief). Alias: search")
+                    .put("id", "Exact profile id")
+                    .put("actionType", "Exact action type (SEND_SMS). Alias: action")
+                    .put("triggerType", "Exact trigger type (MANUAL). Alias: trigger")
+                    .put("enabled", "true|false")
+                    .put("limit", "Max matches; default 20 when q is set, max 100")
+            )
+            put("note", "Unfiltered GET returns every profile. CoS clients must pass q or id.")
+        }
         add("profile", "GET", "/v1/profiles/{id}", "READ", "Read one profile")
         add("profilesValidate", "POST", "/v1/profiles/validate", "PROFILE_WRITE", "Validate a definition without persisting")
         add("profilesUpsert", "POST", "/v1/profiles", "PROFILE_WRITE", "Create or replace a profile")

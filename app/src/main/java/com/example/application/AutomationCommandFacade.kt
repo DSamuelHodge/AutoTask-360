@@ -10,6 +10,8 @@ import com.example.domain.DefinitionCompiler
 import com.example.domain.DefinitionValidator
 import com.example.domain.EventEnvelope
 import com.example.domain.InvalidAutomationException
+import com.example.domain.ProfileListQuery
+import com.example.domain.ProfileSearch
 import com.example.domain.RunNotFoundException
 import com.example.domain.RunSnapshot
 import com.example.domain.ScheduleFire
@@ -59,7 +61,10 @@ class AutomationCommandFacade private constructor(context: Context) {
 
     fun capabilitiesJson(): String = CapabilityProvider.getCapabilitiesJson(appContext)
 
-    suspend fun listProfiles(): List<AutomationProfile> = engine.repository.profileDao.getAllProfiles()
+    suspend fun listProfiles(query: ProfileListQuery = ProfileListQuery()): List<AutomationProfile> {
+        val all = engine.repository.profileDao.getAllProfiles()
+        return ProfileSearch.filter(all, query)
+    }
 
     suspend fun getProfile(id: String): AutomationProfile? = engine.repository.getProfileById(id)
 

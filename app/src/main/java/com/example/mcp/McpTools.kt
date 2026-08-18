@@ -18,7 +18,7 @@ object McpTools {
         Tool(
             name = "autotask.schema",
             title = "AutoTask Schema",
-            description = "Return the AutoTask 2.0 trigger/action schema, REST endpoint catalog, " +
+            description = "Return the AutoTask 2.1 trigger/action schema, REST endpoint catalog, " +
                 "and MCP tool names. Call this before creating or patching profiles.",
             params = schema()
         ),
@@ -32,9 +32,18 @@ object McpTools {
         Tool(
             name = "autotask.profiles.list",
             title = "List Automation Profiles",
-            description = "List saved automation profiles ordered by priority. Profiles are the " +
-                "persistent multi-step task automations executed by AutoTask360.",
-            params = schema()
+            description = "Resolve saved profiles. Always pass q (or actionType) — do not list " +
+                "the full catalog. Matches id, name, description, trigger, and action types " +
+                "(sms → SEND_SMS). Same filter as GET /v1/profiles?q=.",
+            params = schema(
+                "q" to string("Free-text intent or keyword, e.g. sms, morning brief, flashlight"),
+                "search" to string("Alias of q"),
+                "id" to string("Exact profile id"),
+                "actionType" to string("Exact action type, e.g. SEND_SMS"),
+                "triggerType" to string("Exact trigger type, e.g. MANUAL"),
+                "enabled" to bool("If set, only enabled or only disabled profiles"),
+                "limit" to number("Max matches; default 20 when q is set, max 100"),
+            )
         ),
         Tool(
             name = "autotask.profiles.get",

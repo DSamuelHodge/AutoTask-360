@@ -3,6 +3,7 @@ package com.example.mcp
 import android.content.Context
 import com.example.application.AutomationCommandFacade
 import com.example.application.ProfileNotFoundException
+import com.example.domain.ProfileListQuery
 import com.example.security.AccessDeniedException
 import com.example.security.AccessPrincipal
 import com.example.security.ApprovalRequiredException
@@ -205,9 +206,24 @@ object McpHandler {
             "autotask.schema" -> JSONObject(commands.schemaJson())
             "autotask.capabilities" -> JSONObject(commands.capabilitiesJson())
             "autotask.profiles.list" -> {
+                val query = ProfileListQuery(
+                    q = args.optString("q").ifBlank { args.optString("search") }.ifBlank { null },
+                    id = args.optString("id").ifBlank { null },
+                    actionType = args.optString("actionType").ifBlank {
+                        args.optString("action")
+                    }.ifBlank { null },
+                    triggerType = args.optString("triggerType").ifBlank {
+                        args.optString("trigger")
+                    }.ifBlank { null },
+                    enabled = if (args.has("enabled")) args.optBoolean("enabled") else null,
+                    limit = if (args.has("limit")) args.optInt("limit") else null
+                )
                 val arr = JSONArray()
-                commands.listProfiles().forEach { arr.put(AutomationCommandFacade.profileToJson(it)) }
-                JSONObject().put("profiles", arr).put("count", arr.length())
+                commands.listProfiles(query).forEach { arr.put(AutomationCommandFacade.profileToJson(it)) }
+                JSONObject()
+                    .put("profiles", arr)
+                    .put("count", arr.length())
+                    .put("q", query.q ?: JSONObject.NULL)
             }
             "autotask.profiles.get" -> {
                 val id = args.optString("id", "").trim()
