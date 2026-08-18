@@ -4,7 +4,9 @@ import com.example.data.AutomationProfile
 import com.example.domain.DefinitionCompiler
 import com.example.domain.EventEnvelope
 import com.example.domain.RunStatuses
+import com.example.domain.StepRun
 import com.example.domain.StepStatuses
+import org.junit.Assert.assertNotNull
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
@@ -82,6 +84,16 @@ class RunCoordinatorTest {
     }
 
     @Test
+    fun firstAdmissionStampsAnEffectId() = runBlocking {
+        val env = harness(actions = """[{"type":"LOG","params":{"message":"one"}}]""")
+        val result = env.dispatch()
+        val step = result.runs[0].steps.single()
+        assertEquals(StepStatuses.OK, step.status)
+        assertNotNull(step.effectId)
+        assertEquals(step.effectId, env.effectIds.single())
+    }
+
+    @Test
     fun interruptedRunningStepResumesWithoutManualRepair() = runBlocking {
         val env = harness(
             actions = """[{"type":"LOG","params":{"message":"one"}},{"type":"TOAST","params":{"text":"two"}}]"""
@@ -93,6 +105,89 @@ class RunCoordinatorTest {
         assertEquals(1, recovered.size)
         assertEquals(RunStatuses.SUCCESS, recovered[0].run.status)
         assertEquals(listOf("0:LOG", "1:TOAST"), env.calls)
+    }
+
+    @Test
+    fun interruptedSafeStepReentersWithTheSameEffectId() = runBlocking {
+        val env = harness(
+            actions = """[{"type":"LOG","params":{"message":"one"}},{"type":"TOAST","params":{"text":"two"}}]"""
+        )
+        val queued = env.dispatch(executeNow = false)
+        val run = queued.runs[0].run.copy(status = RunStatuses.RUNNING, currentStepIndex = 0)
+        env.store.updateRun(run)
+        env.store.upsertStep(
+            StepRun(
+                stepRunId = "step-0",
+                runId = run.runId,
+                stepIndex = 0,
+                type = "LOG",
+                status = StepStatuses.RUNNING,
+                effectId = "effect-log-1",
+                startedAt = run.createdAt
+            )
+        )
+
+        val recovered = env.coordinator.recoverIncomplete().single()
+        assertEquals(RunStatuses.SUCCESS, recovered.run.status)
+        assertEquals("effect-log-1", recovered.steps[0].effectId)
+        assertEquals("effect-log-1", env.effectIds[0])
+        assertEquals(listOf("0:LOG", "1:TOAST"), env.calls)
+    }
+
+    @Test
+    fun interruptedNonIdempotentStepDoesNotReexecute() = runBlocking {
+        val env = harness(
+            actions = """[{"type":"SEND_SMS","params":{"number":"+15551212","text":"hi"}},{"type":"LOG","params":{"message":"after"}}]"""
+        )
+        val queued = env.dispatch(executeNow = false)
+        val run = queued.runs[0].run.copy(status = RunStatuses.RUNNING, currentStepIndex = 0)
+        env.store.updateRun(run)
+        env.store.upsertStep(
+            StepRun(
+                stepRunId = "step-sms",
+                runId = run.runId,
+                stepIndex = 0,
+                type = "SEND_SMS",
+                status = StepStatuses.RUNNING,
+                effectId = "effect-sms-1",
+                startedAt = run.createdAt
+            )
+        )
+
+        val recovered = env.coordinator.recoverIncomplete().single()
+        assertEquals(RunStatuses.INDETERMINATE, recovered.run.status)
+        assertEquals("resume_indeterminate", recovered.run.error)
+        assertEquals(StepStatuses.INDETERMINATE, recovered.steps.single().status)
+        assertEquals("effect-sms-1", recovered.steps.single().effectId)
+        assertTrue(env.calls.isEmpty())
+    }
+
+    @Test
+    fun retryAfterIndeterminateStartsAFreshRun() = runBlocking {
+        val env = harness(actions = """[{"type":"SEND_SMS","params":{"number":"+15551212","text":"hi"}}]""")
+        val queued = env.dispatch(executeNow = false)
+        val run = queued.runs[0].run.copy(status = RunStatuses.RUNNING, currentStepIndex = 0)
+        env.store.updateRun(run)
+        env.store.upsertStep(
+            StepRun(
+                stepRunId = "step-sms",
+                runId = run.runId,
+                stepIndex = 0,
+                type = "SEND_SMS",
+                status = StepStatuses.RUNNING,
+                effectId = "effect-sms-1",
+                startedAt = run.createdAt
+            )
+        )
+        val crashed = env.coordinator.recoverIncomplete().single()
+        assertEquals(RunStatuses.INDETERMINATE, crashed.run.status)
+
+        val retry = env.coordinator.retry(crashed.run.runId)
+        assertNotEquals(crashed.run.runId, retry.runId)
+        val executed = env.coordinator.execute(retry)
+        assertEquals(RunStatuses.SUCCESS, executed.run.status)
+        assertEquals(listOf("0:SEND_SMS"), env.calls)
+        assertNotEquals("effect-sms-1", executed.steps.single().effectId)
     }
 
     @Test
@@ -204,6 +299,7 @@ class RunCoordinatorTest {
     ): TestEnv {
         val store = InMemoryRunStore()
         val calls = mutableListOf<String>()
+        val effectIds = mutableListOf<String>()
         val profileId = "profile-${System.nanoTime()}"
         val profile = AutomationProfile(
             id = profileId,
@@ -215,8 +311,9 @@ class RunCoordinatorTest {
         )
         val coordinator = RunCoordinator(
             store = store,
-            runner = StepRunner { _, _, stepIndex, type, _ ->
+            runner = StepRunner { _, _, stepIndex, type, _, effectId ->
                 calls.add("$stepIndex:$type")
+                effectIds.add(effectId)
                 if (type == "HTTP") StepResult(stepIndex, type, "FAILED", "boom")
                 else StepResult(stepIndex, type, "OK", "ok")
             },
@@ -231,7 +328,7 @@ class RunCoordinatorTest {
             loadProfile = { if (it == profile.id) profile else null },
             clock = clock
         )
-        return TestEnv(profileId, store, coordinator, dispatcher, calls)
+        return TestEnv(profileId, store, coordinator, dispatcher, calls, effectIds)
     }
 
     private data class TestEnv(
@@ -239,7 +336,8 @@ class RunCoordinatorTest {
         val store: InMemoryRunStore,
         val coordinator: RunCoordinator,
         val dispatcher: EventDispatcher,
-        val calls: MutableList<String>
+        val calls: MutableList<String>,
+        val effectIds: MutableList<String>
     ) {
         suspend fun dispatch(executeNow: Boolean = true) = dispatcher.dispatch(
             EventEnvelope.create(type = "MANUAL", payload = mapOf("profileId" to profileId)),

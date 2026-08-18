@@ -16,6 +16,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -35,6 +36,17 @@ class ActionRegistryTest {
             assertNotNull("missing handler for $type", registry.handler(type))
             assertEquals(type, registry.metadata(type)?.type)
         }
+    }
+
+    @Test
+    fun handlersDefaultToFailClosedResumeExceptLogWaitToast() {
+        val registry = ActionRegistry.standard()
+        assertTrue(registry.handler("LOG")!!.safeToReenter)
+        assertTrue(registry.handler("WAIT")!!.safeToReenter)
+        assertTrue(registry.handler("TOAST")!!.safeToReenter)
+        assertFalse(registry.handler("SEND_SMS")!!.safeToReenter)
+        assertFalse(registry.handler("HTTP")!!.safeToReenter)
+        assertFalse(registry.handler("CALL")!!.safeToReenter)
     }
 
     @Test

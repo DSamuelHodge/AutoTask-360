@@ -29,14 +29,15 @@ class AutoTaskEngine private constructor(
     val runStore: RunStore = RoomRunStore(AutoTaskDatabase.getInstance(context))
     val coordinator = RunCoordinator(
         store = runStore,
-        runner = StepRunner { profile, event, stepIndex, type, params ->
-            executor.executeStep(stepIndex, type, params, profile, event)
+        runner = StepRunner { profile, event, stepIndex, type, params, effectId ->
+            executor.executeStep(stepIndex, type, params, profile, event, effectId)
         },
         wakeScheduler = WorkManagerWakeScheduler(context.applicationContext),
         onTerminal = { run, _, profile, _ ->
             if (run.status == RunStatuses.SUCCESS ||
                 run.status == RunStatuses.PARTIAL ||
-                run.status == RunStatuses.FAILED
+                run.status == RunStatuses.FAILED ||
+                run.status == RunStatuses.INDETERMINATE
             ) {
                 repository.profileDao.updateLastTriggeredAt(profile.id, run.finishedAt ?: run.updatedAt)
             }

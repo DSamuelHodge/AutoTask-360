@@ -54,7 +54,14 @@ class RoomRunStore(database: AutoTaskDatabase) : RunStore {
     override suspend fun upsertStep(step: StepRun) {
         val existing = steps.getByIndex(step.runId, step.stepIndex)
         val entity = StepRunEntity.from(step).let { next ->
-            if (existing != null) next.copy(stepRunId = existing.stepRunId) else next
+            if (existing != null) {
+                next.copy(
+                    stepRunId = existing.stepRunId,
+                    effectId = next.effectId ?: existing.effectId
+                )
+            } else {
+                next
+            }
         }
         steps.upsert(entity)
     }

@@ -9,12 +9,14 @@ object RunStatuses {
     const val FAILED = "FAILED"
     const val CANCELLED = "CANCELLED"
     const val SKIPPED = "SKIPPED"
+    const val INDETERMINATE = "INDETERMINATE"
 
     fun isTerminal(status: String): Boolean = status == SUCCESS ||
         status == PARTIAL ||
         status == FAILED ||
         status == CANCELLED ||
-        status == SKIPPED
+        status == SKIPPED ||
+        status == INDETERMINATE
 
     fun isIncomplete(status: String): Boolean = !isTerminal(status)
 }
@@ -27,6 +29,7 @@ object StepStatuses {
     const val FAILED = "FAILED"
     const val WAITING = "WAITING"
     const val CANCELLED = "CANCELLED"
+    const val INDETERMINATE = "INDETERMINATE"
 }
 
 data class AutomationRun(
@@ -64,7 +67,8 @@ data class StepRun(
     val attempt: Int = 1,
     val startedAt: Long? = null,
     val finishedAt: Long? = null,
-    val continuationJson: String? = null
+    val continuationJson: String? = null,
+    val effectId: String? = null
 )
 
 data class RunSnapshot(

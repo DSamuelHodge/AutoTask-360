@@ -150,7 +150,7 @@ AutomationDefinition {
 
 The external representation may remain JSON, but it must be parsed into typed models at the command boundary. Invalid trigger types, action types, parameters, and incompatible capabilities must fail validation before persistence.
 
-`ActionStep` carries `type` and `params` only. It does not carry an effect-id, idempotency key, or compensation token. Those belong on the run/step records and, when added, on the handler `execute` contract (§6.4).
+`ActionStep` carries `type` and `params` only. It does not carry an effect-id, idempotency key, or compensation token. Those belong on the run/step records and on the handler `execute` contract (§6.4).
 
 ### 6.2 Event envelope
 
@@ -171,19 +171,26 @@ EventEnvelope {
 
 The event identifier and dedupe key support replay protection and idempotent admission. Event payloads should use a canonical JSON representation rather than `Map<String, Any?>` at public boundaries.
 
-Dispatch is serialized globally in-process. `EventDispatcher` holds a single mutex around admission, matching, run creation, and (when `executeNow`) step execution. One event is processed at a time. Matching order is enabled profiles for the trigger type, descending `priority`. The runtime does not partition by `automationId` and does not run two events concurrently inside one process. Same-profile races on shared state cannot occur during dispatch; they can occur only if a crash leaves a `RUNNING` step and `recoverIncomplete` re-enters it (§6.3). Tests for ordering and concurrent load cover FIFO admission, dedupe under contention, and queue-full rejection (`MAX_INCOMPLETE_EVENTS`), not parallel same-profile execution.
+Dispatch is serialized globally in-process. `EventDispatcher` holds a single mutex around admission, matching, run creation, and (when `executeNow`) step execution. One event is processed at a time. Matching order is enabled profiles for the trigger type, descending `priority`. The runtime does not partition by `automationId` and does not run two events concurrently inside one process. Same-profile races on shared state cannot occur during dispatch. A crash that leaves a `RUNNING` step is a resume concern (§6.3), not a dispatch-concurrency concern. Tests for ordering and concurrent load cover FIFO admission, dedupe under contention, and queue-full rejection (`MAX_INCOMPLETE_EVENTS`), not parallel same-profile execution.
 
 ### 6.3 Run and step state
 
 Every requested execution receives a `runId`. Each step is durable and observable. A run must support `cancel`, `retry`, `resume`, and `getStatus` without requiring the original caller to remain connected.
 
-Run statuses: `QUEUED`, `RUNNING`, `WAITING`, `SUCCESS`, `PARTIAL`, `FAILED`, `CANCELLED`, `SKIPPED`.
+Run statuses: `QUEUED`, `RUNNING`, `WAITING`, `SUCCESS`, `PARTIAL`, `FAILED`, `CANCELLED`, `SKIPPED`, `INDETERMINATE`.
 
-Step statuses: `PENDING`, `RUNNING`, `OK`, `SKIPPED`, `FAILED`, `WAITING`, `CANCELLED`.
+Step statuses: `PENDING`, `RUNNING`, `OK`, `SKIPPED`, `FAILED`, `WAITING`, `CANCELLED`, `INDETERMINATE`.
 
 There is no `RETRYING` state. `retry` is allowed only on a terminal run and creates a new `runId` with `currentStepIndex = 0`, `attempt + 1`, and `retryOfRunId` pointing at the original. Max attempts default to 5.
 
-`resume` and crash recovery re-enter a non-terminal run at `currentStepIndex`. A step left in `RUNNING` is treated as incomplete and executed again. Delivery is at-least-once. There is no coordinator-level effect token: if the process dies after a non-idempotent side effect (SMS sent, call placed) but before the step is persisted as `OK`, resume will call the handler again. `requestRun` idempotency keys protect duplicate admission, not duplicate step execution.
+The coordinator writes the step as `RUNNING` with a generated `effectId` before `execute()`. That is the durable admission (request) record. `OK` is the outcome (response) record.
+
+`resume` and crash recovery re-enter a non-terminal run at `currentStepIndex`. A step left in `RUNNING` is classified by `StepResumePolicy`:
+
+- Safe to re-enter (`LOG`, `WAIT`, `TOAST`): call `execute` again with the same `effectId`.
+- Everything else: do not call `execute`. Mark the step and run `INDETERMINATE` with `resume_indeterminate`. The CoS or operator decides; the runtime does not guess.
+
+`requestRun` idempotency keys protect duplicate admission, not duplicate step execution. Explicit `retry` after `INDETERMINATE` is a new run from step 0 with a new `effectId`.
 
 `WAIT` persists a continuation (`wakeAt`, `continuationJson`) and schedules a WorkManager wake. It does not hold a coroutine, foreground service, or process for the wait. On wake, the wait step is marked `OK` and execution continues at the next index.
 
@@ -199,13 +206,12 @@ ActionHandler {
   timeoutMs: Long
   metadata(): ActionMetadata        // risk, autonomy, requirements
   capabilityDenial(context, params): String?
-  execute(request): StepResult
+  safeToReenter: Boolean            // defaults from StepResumePolicy
+  execute(request): StepResult      // request.effectId is the write-ahead token
 }
 ```
 
-Validation, required capabilities, timeout, and risk metadata live on the handler and schema, and are enforced by `ActionRegistry` and Capability Policy — not by each transport. `execute` is not required to be idempotent and does not receive an effect-id or resume token. Adding a handler must not require a central switch except registration.
-
-A later change should add an optional effect-id, or a fail-closed indeterminate step status, so crash-and-resume cannot double-fire SMS, calls, or other non-idempotent actions. That is a known correctness gap. Do not paper over it in individual handler implementations.
+Validation, required capabilities, timeout, and risk metadata live on the handler and schema, and are enforced by `ActionRegistry` and Capability Policy — not by each transport. `execute` is not required to be idempotent. The coordinator refuses to call it again for a `RUNNING` non-safe step. Adding a handler must not require a central switch except registration. New non-idempotent types stay fail-closed unless they are added to `StepResumePolicy.safeToReenterTypes`.
 
 ## 7. Command API
 
@@ -344,7 +350,7 @@ Implementation status: shipped in AutoTask360 2.0. Event envelopes, durable runs
 - Add checkpointed execution, timeout, retry, cancellation, and resume.
 - Convert long waits into persisted continuations.
 
-Tests: process-death recovery, retry-as-new-run, cancellation, duplicate events, global serial dispatch, partial failure, queue-full under concurrent admission, and at-least-once resume of `RUNNING` steps.
+Tests: process-death recovery, retry-as-new-run, cancellation, duplicate events, global serial dispatch, partial failure, queue-full under concurrent admission, safe re-entry of `LOG`/`WAIT`/`TOAST`, and fail-closed `INDETERMINATE` resume of non-idempotent `RUNNING` steps.
 
 Gate: an interrupted run can resume or reach a terminal state without manual database repair.
 
@@ -439,7 +445,7 @@ Gate: an unauthenticated or under-scoped client cannot read or execute protected
 - [x] Document development access through `adb forward`.
 - [x] Document release and LAN security modes.
 - [ ] Add a troubleshooting guide for scheduler, permissions, and run recovery.
-- [ ] Add step-level handler idempotency (effect-id or fail-indeterminate) for crash-and-resume.
+- [x] Add step-level handler idempotency (effect-id or fail-indeterminate) for crash-and-resume.
 
 ## 13. Test coverage plan
 
@@ -452,7 +458,7 @@ Gate: an unauthenticated or under-scoped client cannot read or execute protected
 | MCP and REST | Tool schemas, request mapping, status codes, error shapes, compatibility | Contract tests |
 | Persistence | Migrations, revisions, transactions, run state, database ownership | Room/integration tests |
 | Event ingress | Normalization, dedupe, coalescing, correlation IDs | JVM and Android tests |
-| Run coordinator | Global serial dispatch, retry-as-new-run, timeout, cancellation, at-least-once resume, partial failure | JVM integration tests |
+| Run coordinator | Global serial dispatch, retry-as-new-run, timeout, cancellation, fail-closed resume, partial failure | JVM integration tests |
 | Action handlers | Capability gates and handler behavior | JVM tests plus instrumentation |
 | Scheduling | Next occurrence, timezone, DST, reboot, missed delivery | JVM plus Android integration |
 | Security | Scope matrix, pairing, replay, request limits, redaction | Integration/security tests |
@@ -519,7 +525,7 @@ This architecture is considered implemented when:
 - [x] Decide whether the first implementation remains in `app` packages or extracts Gradle modules immediately.
 - [x] Define the supported cron grammar and timezone semantics. PR 6 uses 5-field cron (`minute hour day-of-month month day-of-week`) with `*`, lists, ranges, and steps; optional IANA `timezone` on TIME/SCHEDULE/SUNRISE_SUNSET (device zone by default). DST gaps skip to the next valid local time; overlaps use the first occurrence.
 - [x] Define the approval model for high-risk actions. Human approval is built in and available: pairing stores `approvedActions`; missing grants for `PAIRED_CLIENT` return `APPROVAL_REQUIRED` and do not execute; a definition may persist `riskPolicy.requireConfirmation` as the operator opt-in hook. The CoS (`INTERNAL_BRAIN`, `LOCAL_DEVICE`) is a privileged, high-autonomy principal — it is not gated by `approvedActions` or `requireConfirmation` in 2.0. It executes after Android permissions and capability policy, with audit. The product intent is a situational, anticipatory CoS, not a per-action permission-begging agent.
-- [ ] Add step-level idempotency (effect-id or fail-indeterminate) so crash-and-resume cannot double-execute non-idempotent handlers.
+- [x] Add step-level idempotency (effect-id or fail-indeterminate) so crash-and-resume cannot double-execute non-idempotent handlers. 2.0 writes `effectId` on `RUNNING` admission. Safe types (`LOG`, `WAIT`, `TOAST`) re-enter with the same id. All other types become `INDETERMINATE` and do not execute again. Explicit `retry` is a new run.
 - [ ] Define retention limits for events, runs, and execution logs.
 - [x] Define the external pairing and credential-rotation flow. PR 7: loopback `POST /v1/pairing/start` issues a 6-digit code; `complete` returns an `atc-` token once and stores only the SHA-256 hash plus scopes. LAN bind is off until a live credential exists. Revoke invalidates the hash. The `cos-` brain token never authorizes LAN.
 - [ ] Decide which context data, if any, crosses the Android/Rust brain boundary.

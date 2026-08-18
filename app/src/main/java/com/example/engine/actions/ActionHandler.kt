@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.data.AutomationProfile
 import com.example.data.AutoTaskRepository
 import com.example.domain.AutomationSchema
+import com.example.domain.StepResumePolicy
 import com.example.engine.AutomationEvent
 import com.example.engine.StepResult
 import okhttp3.OkHttpClient
@@ -31,7 +32,8 @@ data class ActionRequest(
     val type: String,
     val params: JSONObject,
     val substitute: (String) -> String,
-    val services: ActionServices
+    val services: ActionServices,
+    val effectId: String? = null
 )
 
 /**
@@ -55,6 +57,9 @@ interface ActionHandler {
     }
 
     fun capabilityDenial(context: Context, params: JSONObject): String? = null
+
+    val safeToReenter: Boolean
+        get() = StepResumePolicy.safeToReenter(type)
 
     suspend fun execute(request: ActionRequest): StepResult
 }

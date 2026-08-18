@@ -299,6 +299,7 @@ class AutomationCommandFacade private constructor(context: Context) {
                         .put("attempt", step.attempt)
                         .put("startedAt", step.startedAt ?: JSONObject.NULL)
                         .put("finishedAt", step.finishedAt ?: JSONObject.NULL)
+                        .put("effectId", step.effectId ?: JSONObject.NULL)
                 )
             }
             val run = snapshot.run

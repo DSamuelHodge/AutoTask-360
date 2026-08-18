@@ -22,7 +22,8 @@ data class StepRunEntity(
     val attempt: Int,
     val startedAt: Long?,
     val finishedAt: Long?,
-    val continuationJson: String?
+    val continuationJson: String?,
+    val effectId: String? = null
 ) {
     fun toDomain(): StepRun = StepRun(
         stepRunId = stepRunId,
@@ -34,7 +35,8 @@ data class StepRunEntity(
         attempt = attempt,
         startedAt = startedAt,
         finishedAt = finishedAt,
-        continuationJson = continuationJson
+        continuationJson = continuationJson,
+        effectId = effectId
     )
 
     companion object {
@@ -48,7 +50,8 @@ data class StepRunEntity(
             attempt = step.attempt,
             startedAt = step.startedAt,
             finishedAt = step.finishedAt,
-            continuationJson = step.continuationJson
+            continuationJson = step.continuationJson,
+            effectId = step.effectId
         )
     }
 }

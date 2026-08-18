@@ -37,6 +37,7 @@ class ActionExecutor(
 ) {
     companion object {
         fun finalStatusFor(results: List<StepResult>): String {
+            if (results.any { it.status == "INDETERMINATE" }) return "INDETERMINATE"
             val hasFailures = results.any { it.status != "OK" }
             return when {
                 hasFailures && results.any { it.status == "OK" } -> "PARTIAL"
@@ -86,7 +87,8 @@ class ActionExecutor(
         type: String,
         params: JSONObject,
         profile: AutomationProfile,
-        event: AutomationEvent
+        event: AutomationEvent,
+        effectId: String? = null
     ): StepResult {
         val handler = registry.handler(type)
             ?: return StepResult(stepIndex, type, "FAILED", "Unknown action type $type")
@@ -102,7 +104,8 @@ class ActionExecutor(
             type = type,
             params = params,
             substitute = { ActionSupport.substitute(it, profile, event) },
-            services = services
+            services = services,
+            effectId = effectId
         )
         return try {
             withTimeout(handler.timeoutMs) {

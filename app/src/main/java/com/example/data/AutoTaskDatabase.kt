@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         StepRunEntity::class,
         ScheduleRegistrationEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AutoTaskDatabase : RoomDatabase() {
@@ -144,6 +144,12 @@ abstract class AutoTaskDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE step_runs ADD COLUMN effectId TEXT")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AutoTaskDatabase? = null
 
@@ -154,7 +160,7 @@ abstract class AutoTaskDatabase : RoomDatabase() {
                     AutoTaskDatabase::class.java,
                     DATABASE_NAME
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                 LegacyAutoTaskMigration.importIfNeeded(context.applicationContext, instance)
                 INSTANCE = instance

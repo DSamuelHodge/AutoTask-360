@@ -11,6 +11,7 @@ import com.example.domain.InvalidAutomationException
 import com.example.domain.RunNotFoundException
 import com.example.domain.RunSnapshot
 import com.example.domain.RunStatuses
+import com.example.domain.StepResumePolicy
 import com.example.domain.StepRun
 import com.example.domain.StepStatuses
 import com.example.domain.toAutomationEvent
@@ -25,7 +26,8 @@ fun interface StepRunner {
         event: AutomationEvent,
         stepIndex: Int,
         type: String,
-        params: JSONObject
+        params: JSONObject,
+        effectId: String
     ): StepResult
 }
 
@@ -110,14 +112,34 @@ class RunCoordinator(
 
             val spec = steps[index]
             val type = spec.type.uppercase()
+            val existing = store.listSteps(current.runId).firstOrNull { it.stepIndex == index }
+            if (existing != null && (existing.status == StepStatuses.OK || existing.status == StepStatuses.SKIPPED)) {
+                index += 1
+                continue
+            }
+            if (existing?.status == StepStatuses.INDETERMINATE) {
+                return finishIndeterminate(current, existing, now, profile, event)
+            }
+            if (existing?.status == StepStatuses.RUNNING && !StepResumePolicy.safeToReenter(type)) {
+                val marked = existing.copy(
+                    status = StepStatuses.INDETERMINATE,
+                    detail = "resume_indeterminate",
+                    finishedAt = now
+                )
+                store.upsertStep(marked)
+                return finishIndeterminate(current, marked, now, profile, event)
+            }
+
+            val effectId = existing?.effectId?.takeIf { it.isNotBlank() } ?: idFactory()
             val stepRecord = StepRun(
-                stepRunId = idFactory(),
+                stepRunId = existing?.stepRunId ?: idFactory(),
                 runId = current.runId,
                 stepIndex = index,
                 type = type,
                 status = StepStatuses.RUNNING,
                 attempt = current.attempt,
-                startedAt = now
+                startedAt = existing?.startedAt ?: now,
+                effectId = effectId
             )
             store.upsertStep(stepRecord)
             current = current.copy(status = RunStatuses.RUNNING, currentStepIndex = index, updatedAt = now)
@@ -157,7 +179,7 @@ class RunCoordinator(
 
             val result = try {
                 withTimeout(stepTimeoutMs) {
-                    runner.run(profile, event, index, type, spec.params.toJsonObject())
+                    runner.run(profile, event, index, type, spec.params.toJsonObject(), effectId)
                 }
             } catch (_: TimeoutCancellationException) {
                 StepResult(index, type, "FAILED", "step_timeout")
@@ -306,6 +328,28 @@ class RunCoordinator(
         )
         store.updateRun(finished)
         val snap = RunSnapshot(finished, recorded)
+        persistTerminal(snap, profile, event)
+        return snap
+    }
+
+    private suspend fun finishIndeterminate(
+        run: AutomationRun,
+        step: StepRun,
+        now: Long,
+        profile: AutomationProfile,
+        event: AutomationEvent
+    ): RunSnapshot {
+        val finished = run.copy(
+            status = RunStatuses.INDETERMINATE,
+            currentStepIndex = step.stepIndex,
+            error = "resume_indeterminate",
+            finishedAt = now,
+            updatedAt = now,
+            wakeAt = null,
+            durationMs = duration(run, now)
+        )
+        store.updateRun(finished)
+        val snap = RunSnapshot(finished, store.listSteps(run.runId))
         persistTerminal(snap, profile, event)
         return snap
     }
