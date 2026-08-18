@@ -1,0 +1,1 @@
+The AutoTask watch stream is live. A sidecar in tmux session at-watch follows http://127.0.0.1:8787/v1/watch/stream and appends to ~/autotask/watch.log. Do not curl -N yourself. Tail that log for new event and run facts (including INDETERMINATE). Command stays on 8788. Confirm you can see the latest facts in the log, then stay ready to act on what appears.

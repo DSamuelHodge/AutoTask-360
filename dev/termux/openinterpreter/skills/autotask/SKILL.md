@@ -38,14 +38,14 @@ One profile: `triggerType=MANUAL` + `profileId`. Judge success from the run, not
 
 Also: `GET /v1/schedules`, `POST /v1/runs/{id}/cancel|retry|resume`.
 
-Watch (loopback 8787, not 8788):
+Watch stays on 8787 via `~/autotask/watch.sh` (tmux session `at-watch`). Do not block this chat on `curl -N`.
 
 ```bash
+tail -n 40 ~/autotask/watch.log
 curl -sS http://127.0.0.1:8787/v1/watch
-curl -N http://127.0.0.1:8787/v1/watch/stream
 ```
 
-Facts are `event` / `event.deduped` / `run` (including `INDETERMINATE`). Command stays on 8788.
+Facts: `event` / `event.deduped` / `run` (including `INDETERMINATE`). Act on 8788. If the log is stale, `tmux ls` should show `at-watch`.
 
 ## Confirm first
 
