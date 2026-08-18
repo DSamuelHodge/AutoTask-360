@@ -1,11 +1,11 @@
 ---
 name: autotask
-description: Control AutoTask 2.0 on this phone via loopback. Use for automations, profiles, runs, schedules, /autotask.
+description: Control AutoTask 2.1.0 on this phone via loopback. Use for automations, profiles, runs, schedules, /autotask.
 ---
 
-# AutoTask 2.0
+# AutoTask 2.1.0
 
-You are on the phone. Talk to AutoTask at `http://127.0.0.1:8788`. Do not use adb. Do not invent types.
+You are on the phone. Talk to AutoTask at `http://127.0.0.1:8788`. Do not use adb. Do not invent types. Do not use Termux SMS/telephony APIs when an AutoTask profile exists.
 
 ## First
 
@@ -13,9 +13,32 @@ You are on the phone. Talk to AutoTask at `http://127.0.0.1:8788`. Do not use ad
 curl -sS http://127.0.0.1:8788/v1/status
 ```
 
-Stop if `version` is not `2.0`.
+Stop if `version` is not `2.1.0`.
 
-Then:
+## Resolve, then fire
+
+Never dump `GET /v1/profiles`. Never pull schema or dry-run a saved profile.
+
+```bash
+curl -sS 'http://127.0.0.1:8788/v1/profiles?q=sms'
+curl -sS http://127.0.0.1:8788/v1/profiles/cos-sms-send
+```
+
+`q` matches id, name, description, trigger, and action types (`sms` → `SEND_SMS`). Also: `id`, `actionType`, `triggerType`, `enabled`, `limit` (default 20).
+
+Then fire:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8788/v1/events \
+  -H 'Content-Type: application/json' \
+  -d '{"triggerType":"MANUAL","profileId":"cos-sms-send","payload":{"number":"+1…","text":"…"}}'
+```
+
+One profile: `triggerType=MANUAL` + `profileId`. Judge success from `runId` / `GET /v1/runs/{id}`, not HTTP 200.
+
+## New definitions only
+
+Schema, capabilities, validate, and `dryRun=true` are for **creating** a profile, not for `cos-*` you already resolved.
 
 ```bash
 curl -sS http://127.0.0.1:8788/v1/schema
@@ -24,19 +47,7 @@ curl -sS http://127.0.0.1:8788/v1/capabilities
 
 Use only `delivery-ready` types. If a capability is missing, tell the user.
 
-## Do work
-
-```text
-POST /v1/profiles/validate
-POST /v1/events          {"dryRun":true,"triggerType":"MANUAL","profileId":"..."}
-POST /v1/profiles        # after user ok
-POST /v1/runs            # returns runId
-GET  /v1/runs/{runId}
-```
-
-One profile: `triggerType=MANUAL` + `profileId`. Judge success from the run, not HTTP 200.
-
-Also: `GET /v1/schedules`, `POST /v1/runs/{id}/cancel|retry|resume`.
+## Watch
 
 Watch stays on 8787 via `~/autotask/watch.sh` (tmux session `at-watch`). Do not block this chat on `curl -N`.
 
@@ -45,7 +56,7 @@ tail -n 40 ~/autotask/watch.log
 curl -sS http://127.0.0.1:8787/v1/watch
 ```
 
-Facts: `event` / `event.deduped` / `run` (including `INDETERMINATE`). Act on 8788. If the log is stale, `tmux ls` should show `at-watch`.
+Facts: `event` / `event.deduped` / `run` (including `INDETERMINATE`). Act on 8788.
 
 ## Confirm first
 
@@ -53,4 +64,4 @@ SMS, call, WhatsApp send, UI drive, HTTP, file write, camera, OTA, contacts, scr
 
 ## MCP (optional)
 
-`POST /mcp` needs `Authorization: Bearer <cos-token>` and protocol `2026-07-28`. Same commands as `autotask.*` tools. Prefer `/v1` from Termux.
+`POST /mcp` needs `Authorization: Bearer <cos-token>` and protocol `2026-07-28`. Prefer `/v1` from Termux. `autotask.profiles.list` takes the same `q`.

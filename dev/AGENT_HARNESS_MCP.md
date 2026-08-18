@@ -1,7 +1,7 @@
 # Agent Harness MCP Connection
 
-This guide connects an agentic harness running on a Mac host to AutoTask 2.0
-(`versionName` 2.0, `versionCode` 7) running inside the Android app.
+This guide connects an agentic harness running on a Mac host to AutoTask 2.1.0
+(`versionName` 2.1.0, `versionCode` 8) running inside the Android app.
 
 This is a **local development** setup. The Ktor server binds loopback by
 default. Use `adb forward` (below). LAN bind requires an explicit paired
@@ -215,10 +215,11 @@ hand-writing REST calls:
 - `autotask.events.fire`
 - `autotask.logs.list`
 
-Use `autotask.schema` first when constructing a profile. It returns supported
-trigger types, action types, parameter names, risk notes, and template
-variables. Use `autotask.events.fire` with `dryRun=true` before live execution;
-for direct profile execution, send `triggerType=MANUAL` with `profileId`.
+Resolve a saved profile with `autotask.profiles.list` and `q` (same as
+`GET /v1/profiles?q=`). Do not list the unfiltered catalog. Use
+`autotask.schema` only when constructing a **new** profile. Fire a known
+MANUAL profile with `autotask.events.fire` / `POST /v1/events` (`profileId`,
+no `dryRun`). Dry-run is for new definitions, not for `cos-sms-send`.
 
 After changing global MCP configuration, fully quit and reopen Codex or start
 a new task. An already-running chat does not hot-load newly configured MCP
@@ -282,7 +283,7 @@ Important authentication boundary (2.0):
 Authorization: Bearer <paired-atc-token>
 ```
 
-Confirm the phone is on 2.0 with `GET /v1/status` → `version` is `2.0`.
+Confirm the phone is on 2.1.0 with `GET /v1/status` → `version` is `2.1.0`.
 
 All request and response bodies are JSON unless noted otherwise. The normal
 error shape is `{error, code, message}`.
@@ -297,7 +298,7 @@ still return sensitive device state:
 | `GET` | `/v1/status` | Engine, Ktor, permission-readiness, profile/log counts, version, and uptime. |
 | `GET` | `/v1/schema` | Trigger/action schema, template variables, risk, and autonomy metadata. |
 | `GET` | `/v1/capabilities` | Runtime permissions, special access, repair actions, readiness, and agent policy. |
-| `GET` | `/v1/profiles` | List automation profiles. |
+| `GET` | `/v1/profiles` | List profiles. Pass `q` (or `search`), `id`, `actionType`, `triggerType`, `enabled`, `limit`. Unfiltered GET returns every profile — CoS must not do that. |
 | `GET` | `/v1/profiles/{id}` | Read one automation profile. |
 | `GET` | `/v1/logs?limit=N` | Read recent execution logs; default limit is 100. |
 | `GET` | `/v1/runs?limit=N` | List durable run records and statuses. |
@@ -315,9 +316,9 @@ Typical discovery sequence:
 BASE_URL="http://<phone-ip>:8788"
 AUTH=(-H "Authorization: Bearer $COS_MCP_TOKEN")
 curl -sS "${AUTH[@]}" "$BASE_URL/v1/status"
-curl -sS "${AUTH[@]}" "$BASE_URL/v1/schema"
-curl -sS "${AUTH[@]}" "$BASE_URL/v1/capabilities"
-curl -sS "${AUTH[@]}" "$BASE_URL/v1/profiles"
+curl -sS "${AUTH[@]}" "$BASE_URL/v1/profiles?q=sms"
+curl -sS "${AUTH[@]}" "$BASE_URL/v1/profiles/cos-sms-send"
+# schema + capabilities only when creating or patching a definition
 curl -sS "${AUTH[@]}" "$BASE_URL/v1/logs?limit=20"
 ```
 
@@ -462,12 +463,12 @@ means the HTTP bridge is reachable but the token is missing or incorrect.
 Give an agentic harness this prompt after the host tunnel and token are ready:
 
 ```text
-Connect to AutoTask 2.0.
+Connect to AutoTask 2.1.0.
 
 Transport: Streamable HTTP, stateless
 URL: http://127.0.0.1:8788/mcp
 Authentication: Authorization: Bearer $COS_MCP_TOKEN (loopback MCP / brain token)
-First REST call: GET /v1/status and confirm version is 2.0
+First REST call: GET /v1/status and confirm version is 2.1.0
 Then call autotask.schema and autotask.capabilities before any write.
 Protocol version: 2026-07-28
 Required request metadata:

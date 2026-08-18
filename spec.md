@@ -1,6 +1,6 @@
 # AutoTask360 runtime architecture specification
 
-Status: Active — AutoTask360 2.0
+Status: Active — AutoTask360 2.1.0
 
 This specification defines the maintainable product architecture for AutoTask360. It separates the Android automation runtime from any Chief-of-Staff (CoS) agent, Mac harness, language model, CRM, or context service.
 
@@ -183,16 +183,19 @@ Run statuses: `QUEUED`, `RUNNING`, `WAITING`, `SUCCESS`, `PARTIAL`, `FAILED`, `C
 
 Step statuses: `PENDING`, `RUNNING`, `OK`, `SKIPPED`, `FAILED`, `WAITING`, `CANCELLED`, `INDETERMINATE`.
 
-There is no `RETRYING` state. `retry` is allowed only on a terminal run and creates a new `runId` with `currentStepIndex = 0`, `attempt + 1`, and `retryOfRunId` pointing at the original. Max attempts default to 5.
+There is no `RETRYING` state. Whole-run `retry` is allowed only on a terminal run and creates a new `runId` with `currentStepIndex = 0`, `attempt + 1`, and `retryOfRunId` pointing at the original. Max run attempts default to 5.
 
-The coordinator writes the step as `RUNNING` with a generated `effectId` before `execute()`. That is the durable admission (request) record. `OK` is the outcome (response) record.
+The coordinator writes the step as `RUNNING` with a generated `effectId` before `execute()`. That is the durable admission (request) record. `OK` is the outcome (response) record. A committed `effectId` is also written to the effect ledger.
+
+Step-level retry (Temporal activity retry) stays on the same `runId` and the same `effectId`. A retryable `FAILED` (timeout, transport, send error) re-enters execute up to 3 times with short backoff (100–400 ms). Validation failures, unknown types, and capability denials are not retried. The step's `attempt` counts these tries. Backoff is in-process and capped so it does not hold the dispatch mutex for seconds.
 
 `resume` and crash recovery re-enter a non-terminal run at `currentStepIndex`. A step left in `RUNNING` is classified by `StepResumePolicy`:
 
 - Safe to re-enter (`LOG`, `WAIT`, `TOAST`): call `execute` again with the same `effectId`.
+- Dedupe-capable (`SEND_SMS`, `HTTP`, `NOTIFICATION`, `SPEAK`, `CLIPBOARD`, `WRITE_FILE`, `READ_FILE`, `OPEN_URL`, `SEND_INTENT`, `LAUNCH_APP`, `VIBRATE`, `BROADCAST`): call `execute` again with the same `effectId`. The executor returns the ledger `OK` if that id already committed and does not repeat the side effect. If the ledger has no `OK` (crash before commit), execute runs again (at-least-once).
 - Everything else: do not call `execute`. Mark the step and run `INDETERMINATE` with `resume_indeterminate`. The CoS or operator decides; the runtime does not guess.
 
-`requestRun` idempotency keys protect duplicate admission, not duplicate step execution. Explicit `retry` after `INDETERMINATE` is a new run from step 0 with a new `effectId`.
+`requestRun` idempotency keys protect duplicate admission, not duplicate step execution. Explicit whole-run `retry` after `INDETERMINATE` is a new run from step 0 with a new `effectId`.
 
 `WAIT` persists a continuation (`wakeAt`, `continuationJson`) and schedules a WorkManager wake. It does not hold a coroutine, foreground service, or process for the wait. On wake, the wait step is marked `OK` and execution continues at the next index.
 
@@ -208,12 +211,13 @@ ActionHandler {
   timeoutMs: Long
   metadata(): ActionMetadata        // risk, autonomy, requirements
   capabilityDenial(context, params): String?
-  safeToReenter: Boolean            // defaults from StepResumePolicy
+  safeToReenter: Boolean            // defaults from StepResumePolicy.mayReenter
+  dedupesByEffectId: Boolean        // defaults from StepResumePolicy.dedupeCapableTypes
   execute(request): StepResult      // request.effectId is the write-ahead token
 }
 ```
 
-Validation, required capabilities, timeout, and risk metadata live on the handler and schema, and are enforced by `ActionRegistry` and Capability Policy — not by each transport. `execute` is not required to be idempotent. The coordinator refuses to call it again for a `RUNNING` non-safe step. Adding a handler must not require a central switch except registration. New non-idempotent types stay fail-closed unless they are added to `StepResumePolicy.safeToReenterTypes`.
+Validation, required capabilities, timeout, and risk metadata live on the handler and schema, and are enforced by `ActionRegistry` and Capability Policy — not by each transport. The executor, not each handler, consults the effect ledger when `dedupesByEffectId` is true. Adding a handler must not require a central switch except registration. New non-idempotent types stay fail-closed unless they are added to `StepResumePolicy.safeToReenterTypes` or `dedupeCapableTypes`.
 
 ## 7. Command API
 
@@ -223,7 +227,7 @@ The facade should expose these stable operations:
 | --- | --- |
 | `describeSchema` | Return supported triggers, actions, parameters, variables, and schema version. |
 | `describeCapabilities` | Return current permissions, special access, device state, and policy gates. |
-| `listAutomations` / `getAutomation` | Read definitions and revisions. |
+| `listAutomations` / `getAutomation` | Read definitions and revisions. `listAutomations` accepts `q` / `id` / `actionType` / `triggerType` / `enabled` / `limit`. Unfiltered list remains the full catalog; CoS clients must pass `q` or `id`. Shipped as `GET /v1/profiles?q=` and MCP `autotask.profiles.list`. |
 | `validateAutomation` | Validate without persistence or execution. |
 | `saveAutomation` / `patchAutomation` / `deleteAutomation` | Manage persistent definitions. |
 | `simulate` | Resolve matching profiles without side effects. Shipped as `dryRun=true` on `fireEvent` / `POST /v1/events` / `autotask.events.fire`. |
@@ -237,14 +241,22 @@ MCP tools and REST endpoints should map to these commands. MCP should not expose
 
 The CoS workflow is:
 
+**Known profile (the common path):**
+
+1. Resolve with `GET /v1/profiles?q=…` (or `GET /v1/profiles/{id}`). Never dump the unfiltered list.
+2. Confirm with the operator only for SMS, call, HTTP, file write, UI, camera, OTA.
+3. Fire `POST /v1/events` with `triggerType=MANUAL` and `profileId`. Do not dry-run a saved profile the CoS already trusts.
+4. Observe `runId`. Distinguish validation failure, unavailable capability, execution failure, `INDETERMINATE`, and — for paired remotes or opted-in definitions — `APPROVAL_REQUIRED`.
+
+**New definition:**
+
 1. Read schema and capabilities (device state, grants, policy gates).
-2. Use that context to anticipate and plan work.
-3. Validate the proposed automation.
-4. Simulate (`dryRun`) to confirm which profiles would match.
-5. Save or update the automation when the definition should persist.
-6. Request a run with an idempotency key. Local-device and internal-brain principals execute after Android permissions and capability policy. They do not wait on a human prompt. `riskPolicy.requireConfirmation` is persisted on the definition as the operator opt-in hook; 2.0 does not enforce it against the CoS path.
-7. Observe the run. Distinguish validation failure, unavailable capability, execution failure, and — for paired remotes or opted-in definitions — `APPROVAL_REQUIRED`.
-8. Escalate to the built-in human-approval facility when policy or the operator requires it; otherwise continue.
+2. Validate the proposed automation.
+3. Simulate (`dryRun`) to confirm which profiles would match.
+4. Save or update the automation when the definition should persist.
+5. Request a run with an idempotency key. Local-device and internal-brain principals execute after Android permissions and capability policy. They do not wait on a human prompt. `riskPolicy.requireConfirmation` is persisted on the definition as the operator opt-in hook; 2.0 does not enforce it against the CoS path.
+6. Observe the run as above.
+7. Escalate to the built-in human-approval facility when policy or the operator requires it; otherwise continue.
 
 Paired remotes remain on a narrower path: they must present stored `approvedActions` for high-risk types or receive `403 APPROVAL_REQUIRED` and must not execute.
 
@@ -528,7 +540,7 @@ This architecture is considered implemented when:
 - [x] Decide whether the first implementation remains in `app` packages or extracts Gradle modules immediately.
 - [x] Define the supported cron grammar and timezone semantics. PR 6 uses 5-field cron (`minute hour day-of-month month day-of-week`) with `*`, lists, ranges, and steps; optional IANA `timezone` on TIME/SCHEDULE/SUNRISE_SUNSET (device zone by default). DST gaps skip to the next valid local time; overlaps use the first occurrence.
 - [x] Define the approval model for high-risk actions. Human approval is built in and available: pairing stores `approvedActions`; missing grants for `PAIRED_CLIENT` return `APPROVAL_REQUIRED` and do not execute; a definition may persist `riskPolicy.requireConfirmation` as the operator opt-in hook. The CoS (`INTERNAL_BRAIN`, `LOCAL_DEVICE`) is a privileged, high-autonomy principal — it is not gated by `approvedActions` or `requireConfirmation` in 2.0. It executes after Android permissions and capability policy, with audit. The product intent is a situational, anticipatory CoS, not a per-action permission-begging agent.
-- [x] Add step-level idempotency (effect-id or fail-indeterminate) so crash-and-resume cannot double-execute non-idempotent handlers. 2.0 writes `effectId` on `RUNNING` admission. Safe types (`LOG`, `WAIT`, `TOAST`) re-enter with the same id. All other types become `INDETERMINATE` and do not execute again. Explicit `retry` is a new run.
+- [x] Add step-level idempotency (effect-id or fail-indeterminate) so crash-and-resume cannot double-execute non-idempotent handlers. 2.0 writes `effectId` on `RUNNING` admission. 2.1.0 commits successful `effectId`s to the effect ledger and re-enters dedupe-capable types (`SEND_SMS`, `HTTP`, …) with the same id; the executor skips the side effect when the ledger already has `OK`. Safe types (`LOG`, `WAIT`, `TOAST`) still re-enter. Camera, toggles, and UI stay fail-closed. Retryable step failures retry the same `effectId` up to 3 times. Explicit whole-run `retry` is a new run with a new `effectId`.
 - [x] Define retention limits for events, runs, and execution logs. Terminal runs, orphan events, and execution logs older than 14 days are pruned on `AutoTaskRuntime.start()`. Logs are also capped at 500 newest rows. Incomplete runs (`QUEUED` / `RUNNING` / `WAITING`) are never pruned.
 - [x] Define the external pairing and credential-rotation flow. PR 7: loopback `POST /v1/pairing/start` issues a 6-digit code; `complete` returns an `atc-` token once and stores only the SHA-256 hash plus scopes. LAN bind is off until a live credential exists. Revoke invalidates the hash. The `cos-` brain token never authorizes LAN.
 - [x] Decide which context data, if any, crosses the Android/Rust brain boundary. The brain never reads `autotask.db`. Crossing is explicit versioned RPC only (`POST /v1/brain`, `aware.*` / `crm.*` tools, `/v1/http`, `/v1/location`). Allowed: the fields on that RPC (sender, number, destination, owner id, and other method params), last-known lat/lng when travel asks, and contact fields the operator opted to sync. Forbidden: Room files and handles, run/step rows, credentials, tokens, unbounded table dumps, raw screen buffers, and full message bodies in routine logs. The CoS plans and remembers in `cos.db`; AutoTask executes and audits in `autotask.db`.
