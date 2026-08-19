@@ -1,19 +1,19 @@
 ---
 name: autotask
 description: >
-  Connect to and control AutoTask 360 2.1.0 on a USB or LAN phone: adb forward,
+  Connect to and control AutoTask 360 2.1.1 on a USB or LAN phone: adb forward,
   MCP/REST, schema, capabilities, profiles, durable runs, and schedules.
   Use when the user says AutoTask, AutoTask360, Sapphire-Blu, phone automation,
   "connect to the phone", /autotask, or asks to run, schedule, or inspect
   automations on the device.
 ---
 
-# AutoTask 2.1.0
+# AutoTask 2.1.1
 
 AutoTask is an on-device Android execution runtime. You are a client. You do
 not call Android APIs, Room, or the Rust brain directly.
 
-Confirm product version **2.1.0** (`versionCode` 8) before doing work.
+Confirm product version **2.1.1** (`versionCode` 9) before doing work.
 
 ## Connect
 
@@ -28,8 +28,8 @@ curl -sS http://127.0.0.1:8788/v1/status
 curl -sS http://127.0.0.1:8787/v1/watch
 ```
 
-`GET /v1/status` must report `"version": "2.1.0"`. If it does not, stop and say
-the phone is not running AutoTask 2.1.0.
+`GET /v1/status` must report `"version": "2.1.1"`. If it does not, stop and say
+the phone is not running AutoTask 2.1.1.
 
 | Mode | URL | Auth |
 | --- | --- | --- |

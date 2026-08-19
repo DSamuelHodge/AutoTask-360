@@ -17,6 +17,8 @@ object StepRetryPolicy {
         if (d.contains("not granted")) return false
         if (d.contains("capability") && d.contains("blocked")) return false
         if (d.contains("invalid")) return false
+        if (d.contains("sms_radio_timeout")) return false
+        if (d.contains("sms_send_failed")) return false
         return true
     }
 

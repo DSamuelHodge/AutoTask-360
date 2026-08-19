@@ -19,7 +19,7 @@ object ActionSupport {
 
         result = result.replace("{{sender}}", p["sender"]?.toString() ?: "")
         result = result.replace("{{smsBody}}", p["smsBody"]?.toString() ?: "")
-        result = result.replace("{{number}}", p["number"]?.toString() ?: "")
+        result = result.replace("{{number}}", p["number"]?.toString() ?: p["to"]?.toString() ?: p["phone"]?.toString() ?: "")
         result = result.replace("{{callState}}", p["state"]?.toString() ?: p["callState"]?.toString() ?: "")
 
         result = result.replace("{{levelPercent}}", p["levelPercent"]?.toString() ?: p["level"]?.toString() ?: "")
@@ -32,7 +32,8 @@ object ActionSupport {
         result = result.replace("{{packageName}}", p["packageName"]?.toString() ?: "")
         result = result.replace("{{url}}", p["url"]?.toString() ?: "")
         result = result.replace("{{title}}", p["title"]?.toString() ?: "")
-        result = result.replace("{{text}}", p["text"]?.toString() ?: "")
+        result = result.replace("{{text}}", p["text"]?.toString() ?: p["message"]?.toString() ?: p["body"]?.toString() ?: "")
+        result = result.replace("{{message}}", p["message"]?.toString() ?: p["text"]?.toString() ?: "")
         result = result.replace("{{screenState}}", p["state"]?.toString() ?: p["screenState"]?.toString() ?: "")
 
         result = result.replace("{{hour}}", p["hour"]?.toString() ?: "")

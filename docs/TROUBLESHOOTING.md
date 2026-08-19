@@ -1,4 +1,4 @@
-# AutoTask 2.1.0 troubleshooting
+# AutoTask 2.1.1 troubleshooting
 
 Short recovery notes for the on-device runtime. The CoS talks to AutoTask through `/v1` or MCP. It does not open `autotask.db`.
 
@@ -8,7 +8,7 @@ Short recovery notes for the on-device runtime. The CoS talks to AutoTask throug
 
 | Symptom | Check |
 | --- | --- |
-| SMS / call will not send | `send_sms_granted` / `call_phone_granted` |
+| SMS / call will not send | `send_sms_granted` / `call_phone_granted`. For SMS, `GET /v1/runs/{id}` step must be `OK` / `SMS sent to …` (radio ack). `sms_radio_timeout` / `sms_send_failed` means it did not send. |
 | Schedule never fires at the exact minute | `exact_alarm_granted` |
 | DND / silent fails | `dnd_ready` and notification-policy access |
 | Notification actions do nothing | `post_notifications_granted` |
@@ -34,12 +34,14 @@ Every enabled `TIME` / `SCHEDULE` / `SUNRISE_SUNSET` profile must have a row fro
 | `SUCCESS` / `PARTIAL` / `FAILED` / `SKIPPED` / `CANCELLED` | Terminal | `retry` starts a **new** run from step 0 |
 | `INDETERMINATE` | Crash after a non-idempotent step was admitted (`effectId` written) and before `OK` | Do **not** assume the side effect happened or did not. Inspect the device (sent SMS, call log). `retry` is an explicit new send |
 
-Safe to re-enter after a crash: `LOG`, `WAIT`, `TOAST`. Everything else, including `SEND_SMS`, stays `INDETERMINATE`.
+Safe to re-enter after a crash: `LOG`, `WAIT`, `TOAST`. Dedupe-capable types (`SEND_SMS`, `HTTP`, …) re-enter with the same `effectId`; the executor skips a second send if the ledger already has `OK`. Other types stay `INDETERMINATE`.
+
+`SEND_SMS` `OK` means the sent-intent fired, not that `SmsManager` accepted an enqueue.
 
 Startup order: `AutoTaskApplication` → `AutoTaskRuntime.start()` → recover incomplete runs → reconcile schedules → prune history older than 14 days. Incomplete runs are never pruned.
 
 ## Server
 
-Loopback `127.0.0.1:8788` after `adb forward`. `GET /v1/status` must report `"version": "2.1.0"` and `ktor_server_running: true`. LAN needs pairing; the `cos-` brain token is rejected on LAN.
+Loopback `127.0.0.1:8788` after `adb forward`. `GET /v1/status` must report `"version": "2.1.1"` and `ktor_server_running: true`. LAN needs pairing; the `cos-` brain token is rejected on LAN.
 
 Watch is a second loopback server on **8787**. `GET /v1/watch` returns recent facts; `GET /v1/watch/stream` is SSE. The command server will not bind 8787. If `watch_running` is false on `/v1/status`, the service failed to bind the listener (another process on 8787).

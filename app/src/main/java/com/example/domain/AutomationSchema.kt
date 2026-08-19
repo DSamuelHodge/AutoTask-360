@@ -555,11 +555,16 @@ object AutomationSchema {
         add("OPEN_URL", "Opens web URL in default web browser", listOf(string("url", "String web address")))
         add(
             "SEND_INTENT",
-            "Sends a resolve-and-actuate VIEW intent to whatever app handles the scheme",
+            "Sends a resolve-and-actuate intent. Default VIEW+data; SEND/SENDTO can pin a package (e.g. Google Voice share).",
             listOf(
                 string("data", "String full URI (e.g. whatsapp://send?phone=...)"),
                 string("scheme", "String scheme (e.g. whatsapp, mailto, geo, tel)"),
-                string("target", "String target for scheme://target form")
+                string("target", "String target for scheme://target form"),
+                string("action", "Intent action; default android.intent.action.VIEW"),
+                string("package", "Optional target package (e.g. com.google.android.apps.googlevoice)"),
+                string("mimeType", "Optional MIME (text/plain for ACTION_SEND)"),
+                string("extraText", "Optional EXTRA_TEXT / sms_body"),
+                string("extraPhone", "Optional EXTRA_PHONE_NUMBER / address")
             )
         )
         add(

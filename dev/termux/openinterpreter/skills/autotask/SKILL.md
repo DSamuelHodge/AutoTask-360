@@ -1,11 +1,13 @@
 ---
 name: autotask
-description: Control AutoTask 2.1.0 on this phone via loopback. Use for automations, profiles, runs, schedules, /autotask.
+description: Control AutoTask 2.1.1 on this phone via loopback. Use for automations, profiles, runs, schedules, /autotask.
 ---
 
-# AutoTask 2.1.0
+# AutoTask 2.1.1
 
 You are on the phone. Talk to AutoTask at `http://127.0.0.1:8788`. Do not use adb. Do not invent types. Do not use Termux SMS/telephony APIs when an AutoTask profile exists.
+
+Judge SMS from the run step, not HTTP 200. `OK` / `SMS sent to` means the modem acked. `sms_radio_timeout` / `sms_send_failed` means it did not send — do not claim success. Termux `termux-sms-send` is a fallback only after AutoTask reports those failures.
 
 ## First
 
@@ -13,7 +15,7 @@ You are on the phone. Talk to AutoTask at `http://127.0.0.1:8788`. Do not use ad
 curl -sS http://127.0.0.1:8788/v1/status
 ```
 
-Stop if `version` is not `2.1.0`.
+Stop if `version` is not `2.1.1`.
 
 ## Resolve, then fire
 

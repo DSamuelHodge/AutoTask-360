@@ -1,6 +1,6 @@
 # AutoTask360 runtime architecture specification
 
-Status: Active — AutoTask360 2.1.0
+Status: Active — AutoTask360 2.1.1
 
 This specification defines the maintainable product architecture for AutoTask360. It separates the Android automation runtime from any Chief-of-Staff (CoS) agent, Mac harness, language model, CRM, or context service.
 
@@ -186,6 +186,8 @@ Step statuses: `PENDING`, `RUNNING`, `OK`, `SKIPPED`, `FAILED`, `WAITING`, `CANC
 There is no `RETRYING` state. Whole-run `retry` is allowed only on a terminal run and creates a new `runId` with `currentStepIndex = 0`, `attempt + 1`, and `retryOfRunId` pointing at the original. Max run attempts default to 5.
 
 The coordinator writes the step as `RUNNING` with a generated `effectId` before `execute()`. That is the durable admission (request) record. `OK` is the outcome (response) record. A committed `effectId` is also written to the effect ledger.
+
+`SEND_SMS` `OK` means the sent-intent fired `RESULT_OK`. The handler uses the default SMS subscription and `sendMultipartTextMessage` (same path as Termux:API). A radio error is `FAILED` `sms_send_failed:*`. No sent-intent within 20s is `FAILED` `sms_radio_timeout`. Those details are not step-retried. Enqueue without a sent-intent is not success.
 
 Step-level retry (Temporal activity retry) stays on the same `runId` and the same `effectId`. A retryable `FAILED` (timeout, transport, send error) re-enters execute up to 3 times with short backoff (100–400 ms). Validation failures, unknown types, and capability denials are not retried. The step's `attempt` counts these tries. Backoff is in-process and capped so it does not hold the dispatch mutex for seconds.
 

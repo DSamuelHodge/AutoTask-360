@@ -59,10 +59,20 @@ Requirements:
 
 ## 4. Version ownership
 
-- `versionCode` must increase monotonically for every Play/store release.
+- `versionCode` must increase monotonically for every Play/store / sideload
+  drop that replaces a previous APK.
 - `versionName` is human-facing; bump alongside `versionCode`.
 - Both live in `app/build.gradle.kts` `defaultConfig`; the release process owns
   them. Do not auto-decrement.
+- Current: `versionName` **2.1.1**, `versionCode` **9**.
+
+Every published `versionName` gets an **annotated git tag** `v<versionName>`
+on the release commit (example: `v2.1.1`) and a **GitHub Release** on
+`DSamuelHodge/AutoTask-360` for that tag. Push the tag with `main`. Do not
+leave GitHub Releases empty when `main` has a version bump.
+
+Sideload APKs attached to a GitHub Release must be labeled debug vs signed
+release. Do not attach an unsigned debug build as if it were a Play artifact.
 
 ## 5. Rotation / compromise
 

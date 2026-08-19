@@ -1,7 +1,7 @@
 # Agent Harness MCP Connection
 
-This guide connects an agentic harness running on a Mac host to AutoTask 2.1.0
-(`versionName` 2.1.0, `versionCode` 8) running inside the Android app.
+This guide connects an agentic harness running on a Mac host to AutoTask 2.1.1
+(`versionName` 2.1.1, `versionCode` 9) running inside the Android app.
 
 This is a **local development** setup. The Ktor server binds loopback by
 default. Use `adb forward` (below). LAN bind requires an explicit paired
@@ -283,7 +283,7 @@ Important authentication boundary (2.0):
 Authorization: Bearer <paired-atc-token>
 ```
 
-Confirm the phone is on 2.1.0 with `GET /v1/status` → `version` is `2.1.0`.
+Confirm the phone is on 2.1.1 with `GET /v1/status` → `version` is `2.1.1`.
 
 All request and response bodies are JSON unless noted otherwise. The normal
 error shape is `{error, code, message}`.
