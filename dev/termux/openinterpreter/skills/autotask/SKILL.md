@@ -20,15 +20,13 @@ Stop if `version` is not `2.1.1`.
 ## Resolve, then fire
 
 Never dump `GET /v1/profiles`. Never pull schema or dry-run a saved profile.
-
-Pipe list-shaped responses through `hrlite json` when it's installed
-(`~/autotask/bin/hrlite`) -- it trims large arrays down to first/last items,
-anything error-shaped, statistical outliers, and query-relevant matches, and
-is a no-op pass-through on anything small. Safe to always pipe through it.
-The `hrlite` shim cats stdin if the compiled binary is not present yet.
+Resolve with `q` (default limit 20). Do not pipe schema, capabilities, runs,
+or `GET /v1/watch` through `hrlite json`. Those are catalogs / actuation
+records / mixed snapshots, not spam. `hrlite` is only the `watch.sh` SSE
+seatbelt (`watch-line`).
 
 ```bash
-curl -sS 'http://127.0.0.1:8788/v1/profiles?q=sms' | ~/autotask/bin/hrlite json --query sms
+curl -sS 'http://127.0.0.1:8788/v1/profiles?q=sms'
 curl -sS http://127.0.0.1:8788/v1/profiles/cos-sms-send
 ```
 
@@ -42,30 +40,29 @@ curl -sS -X POST http://127.0.0.1:8788/v1/events \
   -d '{"triggerType":"MANUAL","profileId":"cos-sms-send","payload":{"number":"+1…","text":"…"}}'
 ```
 
-One profile: `triggerType=MANUAL` + `profileId`. Judge success from `runId` / `GET /v1/runs/{id}`, not HTTP 200. If a run has many steps, also pipe through `hrlite json`:
+One profile: `triggerType=MANUAL` + `profileId`. Judge success from `runId` / `GET /v1/runs/{id}`, not HTTP 200.
 
 ```bash
-curl -sS http://127.0.0.1:8788/v1/runs/<runId> | ~/autotask/bin/hrlite json
+curl -sS http://127.0.0.1:8788/v1/runs/<runId>
 ```
 
 ## New definitions only
 
-Schema, capabilities, validate, and `dryRun=true` are for **creating** a profile, not for `cos-*` you already resolved. These are large and infrequent -- always pipe through `hrlite json`.
+Schema, capabilities, validate, and `dryRun=true` are for **creating** a profile, not for `cos-*` you already resolved. Fetch them whole. Do not crush them.
 
 ```bash
-curl -sS http://127.0.0.1:8788/v1/schema | ~/autotask/bin/hrlite json
-curl -sS http://127.0.0.1:8788/v1/capabilities | ~/autotask/bin/hrlite json
+curl -sS http://127.0.0.1:8788/v1/schema
+curl -sS http://127.0.0.1:8788/v1/capabilities
 ```
 
 Use only `delivery-ready` types. If a capability is missing, tell the user.
 
 ## Watch
 
-Watch stays on 8787 via `~/autotask/watch.sh` (tmux session `at-watch`). Do not block this chat on `curl -N`. `watch.sh` already pipes the live stream through `hrlite watch-line` when the binary is present, collapsing runs of repeated facts before they hit `watch.log` -- no action needed here. `hrlite` does not bind 8787.
+Watch stays on 8787 via `~/autotask/watch.sh` (tmux session `at-watch`). Do not block this chat on `curl -N`. `hrlite` is a seatbelt on that pipe only: it collapses consecutive same-type events (BATTERY vs CALL are different) and keeps every `kind=run`. It is not catalog compression and it does not bind 8787.
 
 ```bash
 tail -n 40 ~/autotask/watch.log
-curl -sS http://127.0.0.1:8787/v1/watch | ~/autotask/bin/hrlite json
 ```
 
 Facts: `event` / `event.deduped` / `run` (including `INDETERMINATE`). Act on 8788.

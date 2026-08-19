@@ -1,10 +1,8 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # Stay on AutoTask watch (127.0.0.1:8787). Reconnects. Appends facts to watch.log.
-# Facts are piped through hrlite (headroom-lite) to collapse runs of
-# near-identical events before they hit disk / the OI prompt. If hrlite
-# isn't installed yet, falls back to the raw stream unchanged -- this
-# script must keep working with or without the binary present.
-# hrlite does not bind 8787; watch stays here.
+# Seatbelt: hrlite watch-line collapses consecutive same-type events
+# (kind+body.type) and keeps every kind=run. Not catalog compression.
+# Missing binary -> raw stream. Does not bind 8787; watch stays here.
 set -u
 HOME="${HOME:-/data/data/com.termux/files/home}"
 PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
