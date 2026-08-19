@@ -1,5 +1,10 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # Stay on AutoTask watch (127.0.0.1:8787). Reconnects. Appends facts to watch.log.
+# Facts are piped through hrlite (headroom-lite) to collapse runs of
+# near-identical events before they hit disk / the OI prompt. If hrlite
+# isn't installed yet, falls back to the raw stream unchanged -- this
+# script must keep working with or without the binary present.
+# hrlite does not bind 8787; watch stays here.
 set -u
 HOME="${HOME:-/data/data/com.termux/files/home}"
 PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
@@ -8,6 +13,7 @@ DIR="$HOME/autotask"
 LOG="$DIR/watch.log"
 ERR="$DIR/watch.err"
 URL="http://127.0.0.1:8787/v1/watch/stream"
+HRLITE="$HOME/autotask/bin/hrlite"
 mkdir -p "$DIR"
 command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock || true
 echo "$(date -Iseconds) watch start $URL" >>"$LOG"
@@ -17,7 +23,11 @@ while true; do
     sleep 3
     continue
   fi
-  curl -sS -N --retry 0 "$URL" >>"$LOG" 2>>"$ERR" || true
+  if [ -x "$HRLITE" ]; then
+    curl -sS -N --retry 0 "$URL" 2>>"$ERR" | "$HRLITE" watch-line >>"$LOG" || true
+  else
+    curl -sS -N --retry 0 "$URL" >>"$LOG" 2>>"$ERR" || true
+  fi
   echo "$(date -Iseconds) stream dropped, reconnect" >>"$LOG"
   sleep 2
 done

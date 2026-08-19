@@ -1,0 +1,21 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Shim: always present at ~/autotask/bin/hrlite so SKILL.md's
+# `curl ... | ~/autotask/bin/hrlite json` pipelines never fail with
+# "command not found," whether or not the real Rust binary has been built
+# and deployed yet. Once the compiled binary lands next to this shim
+# (renamed, see below) it takes over transparently; until then this is a
+# pass-through, i.e. "no compression, but nothing breaks."
+#
+# Deploy the real binary as ~/autotask/bin/hrlite.real -- this shim execs
+# it if present, else cats stdin straight to stdout so callers still see
+# valid output.
+set -u
+HOME="${HOME:-/data/data/com.termux/files/home}"
+REAL="$HOME/autotask/bin/hrlite.real"
+if [ -x "$REAL" ]; then
+  exec "$REAL" "$@"
+fi
+# No compiled binary yet -- for json/log/watch-line, stdin -> stdout
+# unchanged is always a correct (if unoptimized) fallback: the caller gets
+# the same JSON or log lines it would have gotten without piping at all.
+cat
