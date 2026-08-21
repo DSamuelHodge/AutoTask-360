@@ -129,7 +129,8 @@ data class CatalogueActionItem(
     val description: String,
     val paramsMap: Map<String, String>,
     val notes: String,
-    val category: String
+    val category: String,
+    val state: String
 )
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -391,8 +392,9 @@ private fun parseSchemaData(): Pair<List<CatalogueTriggerItem>, List<CatalogueAc
                 "HTTP", "WRITE_FILE", "READ_FILE", "BROADCAST" -> "DATA/INTEGRATION"
                 else -> "AUTOMATION"
             }
+            val state = a.optString("state", "delivery-ready")
 
-            actions.add(CatalogueActionItem(key, desc, pMap, notes, category))
+            actions.add(CatalogueActionItem(key, desc, pMap, notes, category, state))
         }
 
     } catch (e: Exception) {
@@ -1065,14 +1067,23 @@ private fun CatalogueActionCard(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
-                        .background(HighDensitySurfaceVariant)
+                        .background(
+                            when (item.state) {
+                                "delivery-ready" -> HighDensitySuccessGreen.copy(alpha = 0.15f)
+                                "policy-ready" -> HighDensityPrimaryContainer
+                                else -> HighDensitySurfaceVariant
+                            }
+                        )
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = item.category,
+                        text = item.state,
                         fontSize = 8.sp,
                         fontWeight = FontWeight.Bold,
-                        color = HighDensityOnSurfaceVariant
+                        color = when (item.state) {
+                            "delivery-ready" -> HighDensitySuccessGreen
+                            else -> HighDensityOnSurfaceVariant
+                        }
                     )
                 }
             }
@@ -1373,7 +1384,7 @@ private fun getSamplePayloadForTrigger(type: String): String {
         "INCOMING_CALL", "CALL" -> "{\n  \"state\": \"RINGING\",\n  \"number\": \"+15550122\"\n}"
         "SCREEN" -> "{\n  \"state\": \"ON\"\n}"
         "DEVICE_UNLOCKED" -> "{\n  \"timestamp\": ${System.currentTimeMillis()}\n}"
-        "HEADSET" -> "{\n  \"connected\": true,\n  \"hasMicrophone\": true\n}"
+        "HEADSET" -> "{\n  \"connected\": true\n}"
         "LIGHT" -> "{\n  \"lux\": 8.5,\n  \"belowLux\": 10\n}"
         "TIME" -> "{\n  \"hour\": 22,\n  \"minute\": 0\n}"
         "BOOT" -> "{\n  \"timestamp\": ${System.currentTimeMillis()}\n}"

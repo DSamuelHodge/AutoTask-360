@@ -98,7 +98,7 @@ Further Kotlin without a map will fork `spec.md`, share a SQLite file “for deb
 | KD-12 | Widgets may arm profiles; they may not send SMS. | High-risk side effects stay on an inspectable surface. Operator left Q8 at this default. |
 | KD-13 | **Only remote:** `origin` AutoTask-360.git. Sapphire-Blu is historical (identical at `0d3f513`) and **to be deleted**. This pass does not delete the GitHub repo. | Operator 2026-08-18. Do not fast-forward `sapphire-blu`. Brain source remains `agent-cal-crm` → `libcosd.so`. |
 | KD-14 | Persist `principalKind` + `principalId` on `automation_runs` at admission from `CommandContext` (Room **v7** + `spec.md`). Infer-first is rejected. | Today’s run row has no `source` / principal. Inferring from `correlationId` or `"api"` paints CoS and receivers as the operator. Home chips require a truthful column **before** PRs 4.2/4.3. |
-| KD-15 | Policy stubs (`PolicyStubActionHandler`) return `SKIPPED` / `not_implemented` if invoked. Schema `delivery-ready` is not enough. | Handler currently returns `OK` / “dispatched (system policy level)” with no side effect. |
+| KD-15 | Policy stubs (`PolicyStubActionHandler`) return `SKIPPED` / `not_implemented` if invoked. Schema `delivery-ready` is not enough. | Shipped: stubs return `SKIPPED` / `not_implemented`; schema `state` is `policy-ready`. |
 | KD-16 | v1 CoS product is **sideload only**. Phase 6.2 Play listing / Data safety is **deferred**, not in v1. | Operator 2026-08-18. Signing (6.1) and G63 smoke (6.4) still apply. |
 | KD-17 | Parameterize CRM owner as **`COS_OWNER`** before Phase 2.2 `aware.sms` memory. Do **not** ship `"derrick"` as the 2.2 default. | Operator 2026-08-18. Seed / MCP examples / `libsql_store` / `aware.*` read the env. Empty `COS_OWNER` is fail-visible. |
 
@@ -253,7 +253,7 @@ Run-detail copy (UI_UX §6.6): duration WAIT = “will continue automatically”
 
 - **Retry JSON:** only if a test requires per-profile override; else keep `StepRetryPolicy` globals. Radio timeout is **not** that override.
 - **Watch:** `onTerminal` already publishes terminal runs including `INDETERMINATE`. `cancelRun` publishes separately (`RunCoordinator.cancel` does not call `onTerminal`). **WAIT wake is not terminal** and is **not** a watch event — `RunWakeWorker` → `resumeRun` → continue; the next `kind=run` is the eventual terminal status. PR 1.1 is the INDETERMINATE JVM test only. Mid-run WAIT visibility (`kind=run.update`) is **out of scope** for 1.1.
-- **Stubs:** if `PolicyStubActionHandler` is invoked, return `SKIPPED` / `not_implemented`, not `OK`. Schema remains non-`delivery-ready`.
+- **Stubs:** shipped — `PolicyStubActionHandler` returns `SKIPPED` / `not_implemented`. Schema `state` is `policy-ready`.
 
 ### 4. UI/UX, design system, brand
 

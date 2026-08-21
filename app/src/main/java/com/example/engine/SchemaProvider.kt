@@ -130,6 +130,7 @@ object SchemaProvider {
             obj.put("requirements", JSONArray(descriptor.requirements))
             obj.put("risk", descriptor.risk)
             obj.put("autonomy", descriptor.autonomy)
+            obj.put("state", descriptor.state)
             actionTypes.put(type, obj)
         }
         root.put("actionTypes", actionTypes)

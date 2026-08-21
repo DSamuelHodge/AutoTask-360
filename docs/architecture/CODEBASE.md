@@ -204,8 +204,7 @@ Tabs (today): `PoliciesTab`, `CatalogueTab`, `LogsTab`, `EventsTab`, `StatusTab`
 | `DataAndFlowHandlers.kt` | `HTTP`, `WRITE_FILE`, `READ_FILE`, `WAIT`, `LOG`, `CLIPBOARD` |
 | `AppAndHardwareHandlers.kt` | `LAUNCH_APP`, `SEND_INTENT`, `FLASHLIGHT`, `BROADCAST`, `OPEN_SETTINGS` |
 | `DeviceStateHandlers.kt` | `AUDIO`, `DND`, `BRIGHTNESS`, `SCREEN_TIMEOUT`, `ROTATION` |
-| `CameraActionHandler.kt` | `CAMERA` |
-| stubs via `PolicyStubActionHandler` | `POWER_SAVE`, `WIFI_ACTION`, `BLUETOOTH_ACTION`, `AIRPLANE_MODE_ACTION`, `HOTSPOT`, `NFC_ACTION`, `KILL_APP` — today they can return `OK` with no side effect; Phase 1.4 must return `SKIPPED` / `not_implemented` |
+| stubs via `PolicyStubActionHandler` | `POWER_SAVE`, `WIFI_ACTION`, `BLUETOOTH_ACTION`, `AIRPLANE_MODE_ACTION`, `HOTSPOT`, `NFC_ACTION`, `KILL_APP`, `CAMERA` — return `SKIPPED` / `not_implemented`; schema `state` is `policy-ready` |
 
 `SEND_SMS` today: `SmsManager.sendTextMessage(number, null, text, null, null)` — sent/delivered `PendingIntent`s are null. Phase 1 parks as `WAITING` `kind=sms_sent`. `execute` / `recoverIncomplete` / `RunWakeWorker` must branch on `continuationJson.kind`: `sms_sent` **must not** call `completeWaitStep` (duration WAIT’s `OK` path). Deadline → `FAILED` `sms_radio_timeout`. See [`../product/ROADMAP.md`](../product/ROADMAP.md).
 

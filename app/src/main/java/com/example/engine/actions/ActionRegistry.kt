@@ -4,7 +4,6 @@ import com.example.engine.actions.handlers.AudioActionHandler
 import com.example.engine.actions.handlers.BroadcastActionHandler
 import com.example.engine.actions.handlers.BrightnessActionHandler
 import com.example.engine.actions.handlers.CallActionHandler
-import com.example.engine.actions.handlers.CameraActionHandler
 import com.example.engine.actions.handlers.ClipboardActionHandler
 import com.example.engine.actions.handlers.DndActionHandler
 import com.example.engine.actions.handlers.FlashlightActionHandler
@@ -69,7 +68,7 @@ class ActionRegistry(handlers: List<ActionHandler>) {
             OpenSettingsActionHandler(),
             FlashlightActionHandler(),
             ClipboardActionHandler(),
-            CameraActionHandler(),
+            PolicyStubActionHandler("CAMERA"),
             HttpActionHandler(),
             WriteFileActionHandler(),
             ReadFileActionHandler(),

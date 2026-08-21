@@ -211,6 +211,32 @@ class ActionRegistryTest {
     }
 
     @Test
+    fun policyStubsFailClosedWithNotImplemented() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val executor = ActionExecutor(context, AutoTaskRepository(context))
+        listOf(
+            "POWER_SAVE",
+            "WIFI_ACTION",
+            "BLUETOOTH_ACTION",
+            "AIRPLANE_MODE_ACTION",
+            "HOTSPOT",
+            "NFC_ACTION",
+            "KILL_APP",
+            "CAMERA"
+        ).forEach { type ->
+            val result = executor.executeStep(
+                stepIndex = 0,
+                type = type,
+                params = JSONObject(),
+                profile = testProfile(),
+                event = AutomationEvent(type = "MANUAL")
+            )
+            assertEquals(type, "SKIPPED", result.status)
+            assertEquals(type, "not_implemented", result.detail)
+        }
+    }
+
+    @Test
     fun sendSmsExecuteIsSkippedWhenCapabilityIsMissing() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val executor = ActionExecutor(context, AutoTaskRepository(context))

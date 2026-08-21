@@ -158,23 +158,6 @@ object PolicySeeder {
                 updatedAt = now
             ),
             AutomationProfile(
-                id = "cos-light-sensor-brightness",
-                name = "Low Light Ambient Mode",
-                description = "Adjusts display brightness level when ambient light drops below 10 lux",
-                isEnabled = false,
-                triggerType = "LIGHT",
-                triggerConfigJson = """{"belowLux":10}""",
-                conditionsJson = "{}",
-                actionsJson = """[
-                    {"type":"BRIGHTNESS","params":{"level":30,"auto":false}},
-                    {"type":"TOAST","params":{"text":"Low light detected. Brightness dimmed.","duration":"short"}}
-                ]""".trimIndent(),
-                cooldownMs = 120000L,
-                priority = 5,
-                createdAt = now,
-                updatedAt = now
-            ),
-            AutomationProfile(
                 id = "cos-airplane-mode-guard",
                 name = "Airplane Mode Logger",
                 description = "Logs event and displays toast when Airplane Mode is toggled",

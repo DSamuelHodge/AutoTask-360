@@ -47,7 +47,8 @@ object AutomationSchema {
         val notes: String = "",
         val requirements: List<String> = emptyList(),
         val risk: String = "low",
-        val autonomy: String = "autonomous_allowed"
+        val autonomy: String = "autonomous_allowed",
+        val state: String = "delivery-ready"
     ) {
         val paramsByName: Map<String, ParamSpec> = params.associateBy { it.name }
     }
@@ -126,12 +127,11 @@ object AutomationSchema {
             listOf("{{enabled}}")
         )
         add(
-            "WIFI", "BroadcastReceiver NETWORK_STATE_CHANGED + ConnectivityManager",
+            "WIFI", "BroadcastReceiver NETWORK_STATE_CHANGED",
             "Fires on WiFi state or SSID change", "delivery-ready",
             listOf(
                 string("ssid", "String SSID"),
-                bool("connected", "Boolean"),
-                int("signalStrength", "Int 0-4", 0.0, 4.0)
+                bool("connected", "Boolean")
             ),
             listOf("{{ssid}}", "{{connected}}")
         )
@@ -150,7 +150,7 @@ object AutomationSchema {
             listOf("{{connected}}", "{{networkType}}")
         )
         add(
-            "BLUETOOTH", "BroadcastReceiver ACTION_CONNECTION_STATE_CHANGED",
+            "BLUETOOTH", "BroadcastReceiver ACL_CONNECTED / ACL_DISCONNECTED",
             "Fires on Bluetooth device connect/disconnect", "delivery-ready",
             listOf(
                 string("deviceName", "String filter"),
@@ -185,13 +185,13 @@ object AutomationSchema {
         )
         add(
             "DREAMING", "BroadcastReceiver ACTION_DREAMING_STARTED / STOPPED",
-            "Fires when ambient screen saver starts or stops", "delivery-ready",
+            "Fires when ambient screen saver starts or stops", "policy-ready",
             listOf(bool("active", "Boolean")),
             listOf("{{active}}")
         )
         add(
             "APP_LAUNCH", "AccessibilityService event TYPE_WINDOW_STATE_CHANGED",
-            "Fires when specific app window opens", "delivery-ready",
+            "Fires when specific app window opens", "policy-ready",
             listOf(
                 string("packageName", "String app pkg"),
                 string("className", "String activity class")
@@ -200,7 +200,7 @@ object AutomationSchema {
         )
         add(
             "PACKAGE_CHANGED", "BroadcastReceiver PACKAGE_ADDED / REMOVED / REPLACED",
-            "Fires when app package is installed, removed, or updated", "delivery-ready",
+            "Fires when app package is installed, removed, or updated", "policy-ready",
             listOf(
                 string("packageName", "String"),
                 enumString("event", "installed/removed/updated", setOf("installed", "removed", "updated"))
@@ -209,7 +209,7 @@ object AutomationSchema {
         )
         add(
             "FOREGROUND_APP", "UsageStatsManager poll or AccessibilityService",
-            "Fires on active foreground application change", "partial",
+            "Fires on active foreground application change", "policy-ready",
             listOf(
                 string("packageName", "String"),
                 long("durationMs", "Long")
@@ -217,19 +217,17 @@ object AutomationSchema {
             listOf("{{packageName}}")
         )
         add(
-            "INCOMING_CALL", "TelephonyTriggerController / PHONE_STATE broadcast",
+            "INCOMING_CALL", "BroadcastReceiver PHONE_STATE",
             "Fires on incoming call state change", "delivery-ready",
             listOf(
                 string("numberContains", "String number filter"),
-                string("contactName", "String contact filter"),
-                bool("isUnknown", "Boolean"),
                 enumString("state", "String 'RINGING', 'OFFHOOK', 'IDLE'", CALL_STATES)
             ),
             listOf("{{number}}", "{{callState}}")
         )
         add(
             "OUTGOING_CALL", "BroadcastReceiver NEW_OUTGOING_CALL",
-            "Fires when outgoing phone call is initiated", "delivery-ready",
+            "Fires when outgoing phone call is initiated", "policy-ready",
             listOf(string("numberContains", "String number filter")),
             listOf("{{number}}")
         )
@@ -256,14 +254,13 @@ object AutomationSchema {
             listOf(
                 string("packageName", "String app pkg"),
                 string("titleContains", "String title filter"),
-                string("textContains", "String text filter"),
-                string("priority", "String")
+                string("textContains", "String text filter")
             ),
             listOf("{{packageName}}", "{{title}}", "{{text}}")
         )
         add(
             "NOTIFICATION_REMOVED", "NotificationListenerService onNotificationRemoved",
-            "Fires when notification is dismissed", "delivery-ready",
+            "Fires when notification is dismissed", "policy-ready",
             listOf(
                 string("packageName", "String app pkg"),
                 string("reason", "String reason")
@@ -294,8 +291,7 @@ object AutomationSchema {
             "HEADSET", "BroadcastReceiver ACTION_HEADSET_PLUG",
             "Fires when wired audio headset is plugged/unplugged", "delivery-ready",
             listOf(
-                bool("connected", "Boolean"),
-                bool("hasMicrophone", "Boolean")
+                bool("connected", "Boolean")
             ),
             listOf("{{connected}}")
         )
@@ -303,8 +299,7 @@ object AutomationSchema {
             "USB", "BroadcastReceiver ACTION_USB_DEVICE_ATTACHED / DETACHED",
             "Fires when USB device or accessory is attached/detached", "delivery-ready",
             listOf(
-                bool("connected", "Boolean"),
-                string("deviceClass", "String")
+                bool("connected", "Boolean")
             ),
             listOf("{{connected}}")
         )
@@ -334,8 +329,8 @@ object AutomationSchema {
             listOf("{{tagId}}", "{{ndefRecord}}")
         )
         add(
-            "SHAKE", "SensorTriggerController TYPE_ACCELEROMETER", "Fires when device is shaken",
-            "delivery-ready",
+            "SHAKE", "SensorManager TYPE_ACCELEROMETER", "Fires when device is shaken",
+            "policy-ready",
             listOf(
                 float("threshold", "Float sensitivity"),
                 long("durationMs", "Long cooldown")
@@ -344,12 +339,12 @@ object AutomationSchema {
         )
         add(
             "PROXIMITY", "SensorManager TYPE_PROXIMITY",
-            "Fires when object gets near or far from proximity sensor", "delivery-ready",
+            "Fires when object gets near or far from proximity sensor", "policy-ready",
             listOf(bool("near", "Boolean")),
             listOf("{{near}}")
         )
         add(
-            "LIGHT", "SensorManager TYPE_LIGHT", "Fires on ambient light level changes", "delivery-ready",
+            "LIGHT", "SensorManager TYPE_LIGHT", "Fires on ambient light level changes", "policy-ready",
             listOf(
                 float("belowLux", "Float lux threshold"),
                 float("aboveLux", "Float lux threshold")
@@ -358,7 +353,7 @@ object AutomationSchema {
         )
         add(
             "STEP", "SensorManager TYPE_STEP_COUNTER / STEP_DETECTOR",
-            "Fires on step detector or count threshold", "delivery-ready",
+            "Fires on step detector or count threshold", "policy-ready",
             listOf(
                 int("count", "Int step target"),
                 bool("detected", "Boolean")
@@ -403,7 +398,7 @@ object AutomationSchema {
             listOf("{{attendeeCount}}")
         )
         add(
-            "BOOT", "BroadcastReceiver BOOT_COMPLETED + QUICKBOOT_POWERON",
+            "BOOT", "BroadcastReceiver BOOT_COMPLETED + MY_PACKAGE_REPLACED",
             "Fires once upon device startup", "delivery-ready",
             emptyList(),
             listOf("{{timestamp}}")
@@ -422,7 +417,7 @@ object AutomationSchema {
         )
         add(
             "CUSTOM_INTENT", "BroadcastReceiver with dynamic intent filter",
-            "Fires on custom intent action broadcast", "delivery-ready",
+            "Fires on custom intent action broadcast", "policy-ready",
             listOf(
                 string("action", "String intent action"),
                 obj("extras", "JSONObject extras filter")
@@ -430,13 +425,13 @@ object AutomationSchema {
             listOf("{{action}}")
         )
         add(
-            "MANUAL", "ContentProvider /events insert or POST /v1/events",
+            "MANUAL", "POST /v1/events (facade); ContentProvider /events is in-process",
             "Direct execution triggered by AI agent or user", "delivery-ready",
             listOf(string("profileId", "String target profile ID")),
             listOf("{{payload.*}}")
         )
         add(
-            "CALL", "TelephonyTriggerController / PHONE_STATE",
+            "CALL", "BroadcastReceiver PHONE_STATE",
             "Fires on incoming or active phone calls", "delivery-ready",
             listOf(
                 enumString("state", "String 'RINGING', 'OFFHOOK', 'IDLE'", CALL_STATES),
@@ -497,12 +492,12 @@ object AutomationSchema {
             "medium",
             "policy_allowed"
         )
-        add("POWER_SAVE", "Toggles Power Saver battery mode", listOf(bool("enabled", "Boolean")))
-        add("WIFI_ACTION", "Enables or disables WiFi", listOf(bool("enabled", "Boolean")))
-        add("BLUETOOTH_ACTION", "Enables or disables Bluetooth adapter", listOf(bool("enabled", "Boolean")))
-        add("AIRPLANE_MODE_ACTION", "Toggles Airplane mode state", listOf(bool("enabled", "Boolean")))
-        add("HOTSPOT", "Toggles Local-Only Wi-Fi Hotspot", listOf(bool("enabled", "Boolean")))
-        add("NFC_ACTION", "Toggles NFC adapter state", listOf(bool("enabled", "Boolean")))
+        add("POWER_SAVE", "Toggles Power Saver battery mode", listOf(bool("enabled", "Boolean")), state = "policy-ready")
+        add("WIFI_ACTION", "Enables or disables WiFi", listOf(bool("enabled", "Boolean")), state = "policy-ready")
+        add("BLUETOOTH_ACTION", "Enables or disables Bluetooth adapter", listOf(bool("enabled", "Boolean")), state = "policy-ready")
+        add("AIRPLANE_MODE_ACTION", "Toggles Airplane mode state", listOf(bool("enabled", "Boolean")), state = "policy-ready")
+        add("HOTSPOT", "Toggles Local-Only Wi-Fi Hotspot", listOf(bool("enabled", "Boolean")), state = "policy-ready")
+        add("NFC_ACTION", "Toggles NFC adapter state", listOf(bool("enabled", "Boolean")), state = "policy-ready")
         add(
             "NOTIFICATION", "Posts a system notification",
             listOf(
@@ -574,7 +569,7 @@ object AutomationSchema {
                 string("activity", "String optional target activity")
             )
         )
-        add("KILL_APP", "Terminates background process for package", listOf(string("packageName", "String package name")))
+        add("KILL_APP", "Terminates background process for package", listOf(string("packageName", "String package name")), state = "policy-ready")
         add(
             "OPEN_SETTINGS", "Opens system settings menu directly",
             listOf(enumString("screen", "String 'wifi', 'bluetooth', 'accessibility', 'battery', 'display'", SETTINGS_SCREENS))
@@ -592,7 +587,8 @@ object AutomationSchema {
         )
         add(
             "CAMERA", "Triggers camera photo capture or recording",
-            listOf(enumString("action", "String 'photo' or 'video'", setOf("photo", "video")))
+            listOf(enumString("action", "String 'photo' or 'video'", setOf("photo", "video"))),
+            state = "policy-ready"
         )
         add(
             "HTTP", "Performs an HTTP client request",
@@ -707,9 +703,10 @@ object AutomationSchema {
         notes: String = "",
         requirements: List<String> = emptyList(),
         risk: String = "low",
-        autonomy: String = "autonomous_allowed"
+        autonomy: String = "autonomous_allowed",
+        state: String = "delivery-ready"
     ) {
-        put(type, ActionDescriptor(type, description, params, notes, requirements, risk, autonomy))
+        put(type, ActionDescriptor(type, description, params, notes, requirements, risk, autonomy, state))
     }
 
     private fun string(name: String, description: String) =

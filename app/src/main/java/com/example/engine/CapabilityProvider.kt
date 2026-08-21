@@ -205,9 +205,9 @@ object CapabilityProvider {
             "CAMERA",
             "high",
             "confirm_required",
-            summary["camera_granted"] == true,
+            false,
             listOf("runtime:android.permission.CAMERA", "runtime:android.permission.RECORD_AUDIO_for_video"),
-            "Camera capture actions should require confirmation unless a device-owner policy explicitly allows them."
+            "Not implemented. Schema state is policy-ready; handler returns SKIPPED / not_implemented."
         )
         addAction(
             "READ_FILE",

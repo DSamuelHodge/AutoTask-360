@@ -71,6 +71,12 @@ class PolicySeederTest {
   }
 
   @Test
+  fun starterProfilesDoNotIncludeLightSensorRecipe() {
+    val ids = PolicySeeder.getStarterProfiles().map { it.id }
+    assertFalse(ids.contains("cos-light-sensor-brightness"))
+  }
+
+  @Test
   fun starterProfileIdsAreUnique() {
     val profiles = PolicySeeder.getStarterProfiles()
     val ids = profiles.map { it.id }
