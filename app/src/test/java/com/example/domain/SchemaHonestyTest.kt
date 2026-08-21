@@ -5,6 +5,7 @@ import com.example.application.AutomationCommandFacade
 import com.example.data.PolicySeeder
 import com.example.engine.CapabilityProvider
 import com.example.engine.SchemaProvider
+import com.example.server.KtorServerConfig
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -143,6 +144,38 @@ class SchemaHonestyTest {
     }
 
     @Test
+    fun catalogVersionTwoKeepsPersistedVersionOneCompilable() {
+        val compiled = DefinitionCompiler.compile(
+            JSONObject()
+                .put("id", "v1-battery")
+                .put("name", "Low battery")
+                .put("schemaVersion", 1)
+                .put("triggerType", "BATTERY")
+                .put("triggerConfig", JSONObject().put("levelBelow", 20))
+                .put("actions", JSONArray().put(JSONObject().put("type", "LOG")))
+        )
+        assertEquals(1, compiled.definition.schemaVersion)
+        assertEquals(2, AutomationSchema.CURRENT_VERSION)
+    }
+
+    @Test
+    fun bootDescriptionCoversStartupAndPackageReplace() {
+        val boot = AutomationSchema.trigger("BOOT")!!
+        assertTrue(boot.source.contains("BOOT_COMPLETED"))
+        assertTrue(boot.source.contains("MY_PACKAGE_REPLACED"))
+        assertTrue(boot.description.contains("startup"))
+        assertTrue(boot.description.contains("replaced"))
+    }
+
+    @Test
+    fun cameraSchemaMatchesCapabilityRiskAndAutonomy() {
+        val camera = AutomationSchema.action("CAMERA")!!
+        assertEquals("high", camera.risk)
+        assertEquals("confirm_required", camera.autonomy)
+        assertEquals("policy-ready", camera.state)
+    }
+
+    @Test
     fun cameraCapabilityIsNotReadyWhileTheActionIsAStub() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val camera = JSONObject(CapabilityProvider.getCapabilitiesJson(context))
@@ -155,8 +188,9 @@ class SchemaHonestyTest {
     @Test
     fun statusMapUsesCommandUrlNotRelayTarget() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val snapshot = KtorServerConfig.getSnapshot(context)
         val status = AutomationCommandFacade.getInstance(context).statusMap()
-        assertTrue(status.containsKey("command_url"))
+        assertEquals(snapshot.baseUrl, status["command_url"])
         assertFalse(status.containsKey("relay_target"))
     }
 }

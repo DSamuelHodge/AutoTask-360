@@ -6,7 +6,8 @@ package com.example.domain
  * compiler validates definitions against it.
  */
 object AutomationSchema {
-    const val CURRENT_VERSION = 1
+    /** Catalog 2 dropped unused trigger keys. Extra keys on persisted v1 rows fail compile and skip as invalid_definition. */
+    const val CURRENT_VERSION = 2
 
     enum class ParamKind {
         STRING,
@@ -399,7 +400,7 @@ object AutomationSchema {
         )
         add(
             "BOOT", "BroadcastReceiver BOOT_COMPLETED + MY_PACKAGE_REPLACED",
-            "Fires once upon device startup", "delivery-ready",
+            "Fires on device startup or after this app is replaced", "delivery-ready",
             emptyList(),
             listOf("{{timestamp}}")
         )
@@ -588,6 +589,8 @@ object AutomationSchema {
         add(
             "CAMERA", "Triggers camera photo capture or recording",
             listOf(enumString("action", "String 'photo' or 'video'", setOf("photo", "video"))),
+            risk = "high",
+            autonomy = "confirm_required",
             state = "policy-ready"
         )
         add(
