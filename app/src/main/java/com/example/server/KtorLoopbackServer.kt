@@ -161,7 +161,7 @@ class KtorLoopbackServer(
                     json.put("engine_running", if (commands.isRunning) 1 else 0)
                     json.put("profile_count", statusMap["profile_count"])
                     json.put("log_count", statusMap["log_count"])
-                    json.put("relay_target", "http://127.0.0.1:$port")
+                    json.put("command_url", statusMap["command_url"])
                     json.put("ktor_server_enabled", statusMap["ktor_server_enabled"])
                     json.put("ktor_server_host", statusMap["ktor_server_host"])
                     json.put("ktor_server_port", statusMap["ktor_server_port"])

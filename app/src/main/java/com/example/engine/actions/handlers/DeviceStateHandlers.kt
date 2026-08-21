@@ -154,7 +154,7 @@ class RotationActionHandler : ActionHandler {
 
 class PolicyStubActionHandler(override val type: String) : ActionHandler {
     override suspend fun execute(request: ActionRequest): StepResult {
-        return StepResult(request.stepIndex, type, "OK", "Action $type dispatched (system policy level)")
+        return StepResult(request.stepIndex, type, "SKIPPED", "not_implemented")
     }
 }
 

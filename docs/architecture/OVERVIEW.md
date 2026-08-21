@@ -149,7 +149,7 @@ Run/step statuses, `effectId`, resume/retry, WAIT, and retention are defined onl
 
 ## 8. Event ingress and scheduling
 
-Ingress is **not** matching. `SystemEventReceivers` (registered by `AutoTaskService`) converts SMS, battery, power, Wi-Fi, Bluetooth, airplane, headset, USB, etc. into `AutomationEvent`s and calls the facade. `AutoTaskNotificationListener` posts notification events. `BootReceiver` restarts the service and lets runtime reconcile. `ScheduleAlarmReceiver` + `TimeTriggerWorker` + `RunWakeWorker` deliver scheduled work as events.
+Ingress is **not** matching. `SystemEventReceivers` (registered by `AutoTaskService`) converts SMS, battery, power, Wi-Fi, Bluetooth, airplane, headset, USB, etc. into `AutomationEvent`s and calls the facade. `AutoTaskNotificationListener` posts notification events. `BootReceiver` restarts the service and lets runtime reconcile. `ScheduleAlarmReceiver` + `ScheduleWorkWorker` + `RunWakeWorker` deliver scheduled work as events. TIME and cron use AlarmManager; WorkManager is interval `SCHEDULE` and `WAIT` only.
 
 Scheduling: exact user-visible times → `AlarmManager`; flexible work → `WorkManager`; 5-field cron on `SCHEDULE`; optional IANA `timezone`; DST gaps skip to the next valid local time.
 

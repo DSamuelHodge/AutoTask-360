@@ -58,7 +58,7 @@ class AutoTaskContentProvider : ContentProvider() {
                     "engine_running",
                     "profile_count",
                     "log_count",
-                    "relay_target",
+                    "command_url",
                     "ktor_server_enabled",
                     "ktor_server_host",
                     "ktor_server_port",

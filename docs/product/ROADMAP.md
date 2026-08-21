@@ -103,7 +103,7 @@ Suggested versioning (operator-owned; `versionCode` is monotonic per [`../RELEAS
 2. **Per-profile retry JSON (only if warranted).** Not used for radio timeout. Global `StepRetryPolicy` stays unless a non-radio test requires override.
 3. **Watch completeness.** (a) JVM test: fail-closed resume emits `kind=run` `INDETERMINATE`. `onTerminal` already publishes terminals; `cancelRun` publishes separately. (b) **WAIT wake is not a watch event** — do not add `kind=run.update` in Phase 1.
 4. **Ops doc fix.** Update [`../TROUBLESHOOTING.md`](../TROUBLESHOOTING.md) resume table so `SEND_SMS` is 2.1.0 dedupe-capable, not 2.0 fail-closed.
-5. **Stub honesty.** If `PolicyStubActionHandler` is invoked, return `SKIPPED` / `not_implemented`, not `OK`. Schema stays non-`delivery-ready`.
+5. **Stub honesty.** Done: `PolicyStubActionHandler` returns `SKIPPED` / `not_implemented`. Schema `state` is `policy-ready`.
 
 **Dependencies:** Phase 0.
 

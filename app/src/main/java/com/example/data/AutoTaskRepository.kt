@@ -65,7 +65,7 @@ class AutoTaskRepository(context: Context) {
             "log_count" to logCount,
             "incomplete_run_count" to incompleteRunCount,
             "scheduled_count" to scheduledCount,
-            "relay_target" to serverConfig.baseUrl,
+            "command_url" to serverConfig.baseUrl,
             "ktor_server_enabled" to serverConfig.enabled,
             "ktor_server_host" to serverConfig.host,
             "ktor_server_port" to serverConfig.port,
